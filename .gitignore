@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Build output
+frontend/dist/
+
+# Environment and secrets
+.env
+*.env.local
+
+# Database
+data/*.db
+data/*.db-journal
+
+# Uploaded files
+uploads/plants/*
+!uploads/plants/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Temp files
+*.tmp
+*.temp
