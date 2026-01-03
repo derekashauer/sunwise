@@ -3,11 +3,13 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { usePlantsStore } from '@/stores/plants'
 import { useLocationsStore } from '@/stores/locations'
+import { useApi } from '@/composables/useApi'
 
 const router = useRouter()
 const route = useRoute()
 const plants = usePlantsStore()
 const locationsStore = useLocationsStore()
+const api = useApi()
 
 const isEditing = computed(() => !!route.params.id)
 const loading = ref(false)
@@ -15,6 +17,17 @@ const identifying = ref(false)
 const error = ref('')
 const showAddLocation = ref(false)
 const newLocationName = ref('')
+
+// Name generator
+const generatingNames = ref(false)
+const suggestedNames = ref([])
+const showNameSuggestions = ref(false)
+
+// Species picker modal
+const showSpeciesPicker = ref(false)
+const speciesCandidates = ref([])
+const selectedSpecies = ref(null)
+const pendingPlantId = ref(null)
 
 const form = ref({
   name: '',
@@ -53,10 +66,10 @@ const lightConditions = [
 ]
 
 const healthStatuses = [
-  { value: 'thriving', label: 'Thriving', emoji: '🌟', desc: 'Growing vigorously' },
-  { value: 'healthy', label: 'Healthy', emoji: '✅', desc: 'Doing well' },
-  { value: 'struggling', label: 'Struggling', emoji: '⚠️', desc: 'Needs attention' },
-  { value: 'critical', label: 'Critical', emoji: '🚨', desc: 'Urgent care needed' }
+  { value: 'thriving', label: 'Thriving', emoji: '1f31f', desc: 'Growing vigorously' },
+  { value: 'healthy', label: 'Healthy', emoji: '2705', desc: 'Doing well' },
+  { value: 'struggling', label: 'Struggling', emoji: '26a0-fe0f', desc: 'Needs attention' },
+  { value: 'critical', label: 'Critical', emoji: '1f6a8', desc: 'Urgent care needed' }
 ]
 
 onMounted(async () => {
@@ -78,11 +91,42 @@ onMounted(async () => {
       if (plant.thumbnail) {
         imagePreview.value = `/uploads/plants/${plant.thumbnail}`
       }
+
+      // Check if there are species candidates to show
+      if (plant.species_candidates && !plant.species_confirmed) {
+        try {
+          speciesCandidates.value = JSON.parse(plant.species_candidates)
+          if (speciesCandidates.value.length > 1) {
+            pendingPlantId.value = plant.id
+            showSpeciesPicker.value = true
+          }
+        } catch (e) {
+          console.error('Failed to parse species candidates:', e)
+        }
+      }
     } catch (e) {
       error.value = 'Failed to load plant'
     }
   }
 })
+
+async function generateNames() {
+  generatingNames.value = true
+  try {
+    const response = await api.get('/plants/generate-name?count=5')
+    suggestedNames.value = response.names
+    showNameSuggestions.value = true
+  } catch (e) {
+    window.$toast?.error('Failed to generate names')
+  } finally {
+    generatingNames.value = false
+  }
+}
+
+function selectName(name) {
+  form.value.name = name
+  showNameSuggestions.value = false
+}
 
 async function addLocation() {
   if (!newLocationName.value.trim()) return
@@ -142,7 +186,25 @@ async function handleSubmit() {
     } else {
       const plant = await plants.createPlant(formData)
       window.$toast?.success('Plant added! AI is analyzing...')
-      router.replace(`/plants/${plant.id}`)
+
+      // Check for species candidates after a short delay
+      setTimeout(async () => {
+        try {
+          const updatedPlant = await plants.getPlant(plant.id)
+          if (updatedPlant.species_candidates && !updatedPlant.species_confirmed) {
+            const candidates = JSON.parse(updatedPlant.species_candidates)
+            if (candidates.length > 1) {
+              speciesCandidates.value = candidates
+              pendingPlantId.value = plant.id
+              showSpeciesPicker.value = true
+              return
+            }
+          }
+        } catch (e) {
+          console.error('Failed to check species candidates:', e)
+        }
+        router.replace(`/plants/${plant.id}`)
+      }, 3000)
       return
     }
 
@@ -151,6 +213,28 @@ async function handleSubmit() {
     error.value = e.message
   } finally {
     loading.value = false
+  }
+}
+
+async function confirmSpecies() {
+  if (!selectedSpecies.value || !pendingPlantId.value) return
+
+  try {
+    await api.post(`/plants/${pendingPlantId.value}/confirm-species`, {
+      species: selectedSpecies.value
+    })
+    window.$toast?.success('Species confirmed!')
+    showSpeciesPicker.value = false
+    router.replace(`/plants/${pendingPlantId.value}`)
+  } catch (e) {
+    window.$toast?.error('Failed to confirm species')
+  }
+}
+
+function skipSpeciesSelection() {
+  showSpeciesPicker.value = false
+  if (pendingPlantId.value) {
+    router.replace(`/plants/${pendingPlantId.value}`)
   }
 }
 </script>
@@ -208,9 +292,25 @@ async function handleSubmit() {
         </div>
       </div>
 
-      <!-- Name -->
+      <!-- Name with dice roll -->
       <div>
-        <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+        <div class="flex items-center justify-between mb-1">
+          <label for="name" class="block text-sm font-medium text-gray-700">Name *</label>
+          <button
+            type="button"
+            @click="generateNames"
+            :disabled="generatingNames"
+            class="text-sm text-plant-600 hover:text-plant-700 flex items-center gap-1"
+          >
+            <svg v-if="generatingNames" class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+            </svg>
+            Random name
+          </button>
+        </div>
         <input
           id="name"
           v-model="form.name"
@@ -218,6 +318,29 @@ async function handleSubmit() {
           class="input"
           placeholder="e.g., Living Room Monstera"
         >
+        <!-- Name suggestions dropdown -->
+        <div v-if="showNameSuggestions && suggestedNames.length > 0" class="mt-2 p-2 bg-white border border-gray-200 rounded-xl shadow-lg">
+          <p class="text-xs text-gray-500 mb-2">Pick a name:</p>
+          <div class="space-y-1">
+            <button
+              v-for="name in suggestedNames"
+              :key="name"
+              type="button"
+              @click="selectName(name)"
+              class="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-plant-50 hover:text-plant-700 transition-colors"
+            >
+              {{ name }}
+            </button>
+          </div>
+          <button
+            type="button"
+            @click="generateNames"
+            :disabled="generatingNames"
+            class="w-full mt-2 text-xs text-plant-600 hover:text-plant-700"
+          >
+            Roll again
+          </button>
+        </div>
       </div>
 
       <!-- Species (auto-filled by AI) -->
@@ -348,7 +471,11 @@ async function handleSubmit() {
               ? 'border-plant-500 bg-plant-50'
               : 'border-gray-200 hover:border-gray-300'"
           >
-            <span class="text-xl">{{ status.emoji }}</span>
+            <img
+              :src="`https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/${status.emoji}.svg`"
+              class="w-5 h-5"
+              alt=""
+            >
             <div>
               <span class="text-sm font-medium block" :class="form.health_status === status.value ? 'text-plant-700' : 'text-gray-700'">
                 {{ status.label }}
@@ -384,5 +511,57 @@ async function handleSubmit() {
         <span v-else>{{ isEditing ? 'Save Changes' : 'Add Plant' }}</span>
       </button>
     </form>
+
+    <!-- Species Picker Modal -->
+    <div v-if="showSpeciesPicker" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div class="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-auto">
+        <div class="p-4 border-b">
+          <h2 class="text-lg font-semibold text-gray-900">Confirm Plant Species</h2>
+          <p class="text-sm text-gray-500 mt-1">AI detected multiple possible species. Which one is correct?</p>
+        </div>
+
+        <div class="p-4 space-y-2">
+          <button
+            v-for="candidate in speciesCandidates"
+            :key="candidate.species"
+            @click="selectedSpecies = candidate.species"
+            class="w-full p-3 rounded-xl border-2 text-left transition-all flex items-center justify-between"
+            :class="selectedSpecies === candidate.species
+              ? 'border-plant-500 bg-plant-50'
+              : 'border-gray-200 hover:border-gray-300'"
+          >
+            <div>
+              <span class="font-medium text-gray-900">{{ candidate.species }}</span>
+              <span class="text-xs text-gray-500 ml-2">{{ Math.round(candidate.confidence * 100) }}% confidence</span>
+            </div>
+            <div
+              v-if="selectedSpecies === candidate.species"
+              class="w-5 h-5 bg-plant-500 rounded-full flex items-center justify-center"
+            >
+              <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+          </button>
+        </div>
+
+        <div class="p-4 border-t flex gap-2">
+          <button
+            @click="skipSpeciesSelection"
+            class="btn-secondary flex-1"
+          >
+            Skip
+          </button>
+          <button
+            @click="confirmSpecies"
+            :disabled="!selectedSpecies"
+            class="btn-primary flex-1"
+            :class="{ 'opacity-50 cursor-not-allowed': !selectedSpecies }"
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

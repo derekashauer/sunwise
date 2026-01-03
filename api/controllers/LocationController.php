@@ -57,11 +57,6 @@ class LocationController
     public function update(array $params, array $body, ?int $userId): array
     {
         $locationId = $params['id'];
-        $name = trim($body['name'] ?? '');
-
-        if (!$name) {
-            return ['status' => 400, 'data' => ['error' => 'Location name is required']];
-        }
 
         // Verify ownership
         $stmt = db()->prepare('SELECT id FROM locations WHERE id = ? AND user_id = ?');
@@ -70,8 +65,37 @@ class LocationController
             return ['status' => 404, 'data' => ['error' => 'Location not found']];
         }
 
-        $stmt = db()->prepare('UPDATE locations SET name = ? WHERE id = ?');
-        $stmt->execute([$name, $locationId]);
+        // Build dynamic update
+        $updates = [];
+        $values = [];
+
+        if (isset($body['name'])) {
+            $name = trim($body['name']);
+            if (!$name) {
+                return ['status' => 400, 'data' => ['error' => 'Location name is required']];
+            }
+            $updates[] = 'name = ?';
+            $values[] = $name;
+        }
+
+        if (isset($body['window_orientation'])) {
+            $orientation = $body['window_orientation'];
+            $valid = ['north', 'south', 'east', 'west', 'none', null];
+            if (!in_array($orientation, $valid)) {
+                return ['status' => 400, 'data' => ['error' => 'Invalid window orientation']];
+            }
+            $updates[] = 'window_orientation = ?';
+            $values[] = $orientation;
+        }
+
+        if (empty($updates)) {
+            return ['status' => 400, 'data' => ['error' => 'No fields to update']];
+        }
+
+        $values[] = $locationId;
+        $sql = 'UPDATE locations SET ' . implode(', ', $updates) . ' WHERE id = ?';
+        $stmt = db()->prepare($sql);
+        $stmt->execute($values);
 
         $stmt = db()->prepare('SELECT * FROM locations WHERE id = ?');
         $stmt->execute([$locationId]);

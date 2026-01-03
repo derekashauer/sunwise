@@ -49,19 +49,27 @@ class ClaudeService implements AIServiceInterface
         $prompt = <<<PROMPT
 Analyze this plant photo and identify:
 1. Species/common name (with confidence level 0-1)
-2. Current health assessment (thriving, healthy, struggling, critical, or unknown)
-3. Any visible issues (pests, disease, nutrient deficiency, overwatering, underwatering, etc.)
-4. Estimated age/maturity (young, juvenile, mature, or unknown)
+2. If uncertain, provide up to 3 possible species candidates with confidence levels
+3. Current health assessment (thriving, healthy, struggling, critical, or unknown)
+4. Any visible issues (pests, disease, nutrient deficiency, overwatering, underwatering, etc.)
+5. Estimated age/maturity (young, juvenile, mature, or unknown)
 
 Respond ONLY with valid JSON in this exact format:
 {
-    "species": "Common Name (Scientific Name)",
+    "species": "Most Likely Common Name (Scientific Name)",
     "confidence": 0.85,
+    "candidates": [
+        {"species": "Most Likely (Scientific)", "confidence": 0.85},
+        {"species": "Second Option (Scientific)", "confidence": 0.65},
+        {"species": "Third Option (Scientific)", "confidence": 0.45}
+    ],
     "health_status": "healthy",
     "issues": ["description of any issues"],
     "maturity": "mature",
     "notes": "Any additional observations"
 }
+
+Include the "candidates" array only if confidence is below 0.9 or if the plant could reasonably be one of several similar species. If very confident (0.9+), candidates can be omitted or contain only the single match.
 PROMPT;
 
         $response = $this->sendRequest([

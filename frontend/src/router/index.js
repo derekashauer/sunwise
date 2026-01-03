@@ -67,6 +67,12 @@ const routes = [
     name: 'verify',
     component: () => import('@/views/VerifyView.vue'),
     meta: { requiresAuth: false }
+  },
+  {
+    path: '/gallery/:token',
+    name: 'public-gallery',
+    component: () => import('@/views/PublicGalleryView.vue'),
+    meta: { requiresAuth: false, isGuest: true }
   }
 ]
 

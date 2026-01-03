@@ -131,6 +131,24 @@ $routes = [
     'DELETE /settings/ai/claude-key' => ['SettingsController', 'removeClaudeKey', true],
     'DELETE /settings/ai/openai-key' => ['SettingsController', 'removeOpenAIKey', true],
     'PUT /settings/ai/default-provider' => ['SettingsController', 'setDefaultProvider', true],
+
+    // Notification settings routes
+    'GET /settings/notifications' => ['SettingsController', 'getNotificationSettings', true],
+    'PUT /settings/notifications/email-digest' => ['SettingsController', 'updateEmailDigest', true],
+    'PUT /settings/notifications/sms' => ['SettingsController', 'updateSmsSettings', true],
+
+    // Public gallery settings routes
+    'GET /settings/public-gallery' => ['SettingsController', 'getPublicGallerySettings', true],
+    'PUT /settings/public-gallery' => ['SettingsController', 'updatePublicGallery', true],
+
+    // Public gallery view (no auth)
+    'GET /gallery/{token}' => ['GalleryController', 'show'],
+
+    // Plant name generator
+    'GET /plants/generate-name' => ['PlantController', 'generateName', true],
+
+    // Species confirmation
+    'POST /plants/{id}/confirm-species' => ['PlantController', 'confirmSpecies', true],
 ];
 
 // Match route

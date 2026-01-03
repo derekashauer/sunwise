@@ -196,4 +196,189 @@ class SettingsController
 
         return ['success' => true, 'default_provider' => $provider];
     }
+
+    /**
+     * Get notification settings
+     * GET /settings/notifications
+     */
+    public function getNotificationSettings(array $params, array $body, ?int $userId): array
+    {
+        $stmt = db()->prepare('
+            SELECT email_digest_enabled, email_digest_time, sms_enabled, sms_phone,
+                   twilio_account_sid, twilio_phone_number,
+                   CASE WHEN twilio_auth_token_encrypted IS NOT NULL THEN 1 ELSE 0 END as has_twilio_token
+            FROM users WHERE id = ?
+        ');
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch();
+
+        return [
+            'email_digest_enabled' => (bool)($user['email_digest_enabled'] ?? 0),
+            'email_digest_time' => $user['email_digest_time'] ?? '08:00',
+            'sms_enabled' => (bool)($user['sms_enabled'] ?? 0),
+            'sms_phone' => $user['sms_phone'] ?? '',
+            'twilio_account_sid' => $user['twilio_account_sid'] ?? '',
+            'twilio_phone_number' => $user['twilio_phone_number'] ?? '',
+            'has_twilio_token' => (bool)($user['has_twilio_token'] ?? 0)
+        ];
+    }
+
+    /**
+     * Update email digest settings
+     * PUT /settings/notifications/email-digest
+     */
+    public function updateEmailDigest(array $params, array $body, ?int $userId): array
+    {
+        $enabled = isset($body['enabled']) ? (int)(bool)$body['enabled'] : null;
+        $time = $body['time'] ?? null;
+
+        // Validate time format
+        if ($time !== null && !preg_match('/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/', $time)) {
+            return ['status' => 400, 'data' => ['error' => 'Invalid time format. Use HH:MM (24-hour)']];
+        }
+
+        $updates = [];
+        $values = [];
+
+        if ($enabled !== null) {
+            $updates[] = 'email_digest_enabled = ?';
+            $values[] = $enabled;
+        }
+        if ($time !== null) {
+            $updates[] = 'email_digest_time = ?';
+            $values[] = $time;
+        }
+
+        if (empty($updates)) {
+            return ['status' => 400, 'data' => ['error' => 'No settings to update']];
+        }
+
+        $values[] = $userId;
+        $stmt = db()->prepare('UPDATE users SET ' . implode(', ', $updates) . ' WHERE id = ?');
+        $stmt->execute($values);
+
+        return ['success' => true];
+    }
+
+    /**
+     * Update SMS settings
+     * PUT /settings/notifications/sms
+     */
+    public function updateSmsSettings(array $params, array $body, ?int $userId): array
+    {
+        $enabled = isset($body['enabled']) ? (int)(bool)$body['enabled'] : null;
+        $phone = $body['phone'] ?? null;
+        $twilioSid = $body['twilio_account_sid'] ?? null;
+        $twilioToken = $body['twilio_auth_token'] ?? null;
+        $twilioPhone = $body['twilio_phone_number'] ?? null;
+
+        $updates = [];
+        $values = [];
+
+        if ($enabled !== null) {
+            $updates[] = 'sms_enabled = ?';
+            $values[] = $enabled;
+        }
+        if ($phone !== null) {
+            $updates[] = 'sms_phone = ?';
+            $values[] = $phone;
+        }
+        if ($twilioSid !== null) {
+            $updates[] = 'twilio_account_sid = ?';
+            $values[] = $twilioSid;
+        }
+        if ($twilioToken !== null) {
+            $encryptedToken = EncryptionService::encrypt($twilioToken);
+            $updates[] = 'twilio_auth_token_encrypted = ?';
+            $values[] = $encryptedToken;
+        }
+        if ($twilioPhone !== null) {
+            $updates[] = 'twilio_phone_number = ?';
+            $values[] = $twilioPhone;
+        }
+
+        if (empty($updates)) {
+            return ['status' => 400, 'data' => ['error' => 'No settings to update']];
+        }
+
+        $values[] = $userId;
+        $stmt = db()->prepare('UPDATE users SET ' . implode(', ', $updates) . ' WHERE id = ?');
+        $stmt->execute($values);
+
+        return ['success' => true];
+    }
+
+    /**
+     * Get public gallery settings
+     * GET /settings/public-gallery
+     */
+    public function getPublicGallerySettings(array $params, array $body, ?int $userId): array
+    {
+        $stmt = db()->prepare('
+            SELECT public_gallery_enabled, public_gallery_token, public_gallery_name
+            FROM users WHERE id = ?
+        ');
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch();
+
+        $baseUrl = rtrim(APP_URL, '/');
+
+        return [
+            'enabled' => (bool)($user['public_gallery_enabled'] ?? 0),
+            'token' => $user['public_gallery_token'] ?? null,
+            'name' => $user['public_gallery_name'] ?? null,
+            'url' => $user['public_gallery_token'] ? "{$baseUrl}/gallery/{$user['public_gallery_token']}" : null
+        ];
+    }
+
+    /**
+     * Update public gallery settings
+     * PUT /settings/public-gallery
+     */
+    public function updatePublicGallery(array $params, array $body, ?int $userId): array
+    {
+        $enabled = isset($body['enabled']) ? (int)(bool)$body['enabled'] : null;
+        $name = $body['name'] ?? null;
+        $regenerateToken = $body['regenerate_token'] ?? false;
+
+        $updates = [];
+        $values = [];
+
+        if ($enabled !== null) {
+            $updates[] = 'public_gallery_enabled = ?';
+            $values[] = $enabled;
+
+            // Generate token if enabling and no token exists
+            if ($enabled) {
+                $stmt = db()->prepare('SELECT public_gallery_token FROM users WHERE id = ?');
+                $stmt->execute([$userId]);
+                $user = $stmt->fetch();
+                if (empty($user['public_gallery_token'])) {
+                    $regenerateToken = true;
+                }
+            }
+        }
+
+        if ($name !== null) {
+            $updates[] = 'public_gallery_name = ?';
+            $values[] = $name;
+        }
+
+        if ($regenerateToken) {
+            $token = bin2hex(random_bytes(16));
+            $updates[] = 'public_gallery_token = ?';
+            $values[] = $token;
+        }
+
+        if (empty($updates)) {
+            return ['status' => 400, 'data' => ['error' => 'No settings to update']];
+        }
+
+        $values[] = $userId;
+        $stmt = db()->prepare('UPDATE users SET ' . implode(', ', $updates) . ' WHERE id = ?');
+        $stmt->execute($values);
+
+        // Return updated settings
+        return $this->getPublicGallerySettings($params, $body, $userId);
+    }
 }

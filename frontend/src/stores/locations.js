@@ -30,8 +30,10 @@ export const useLocationsStore = defineStore('locations', () => {
     return response.location
   }
 
-  async function updateLocation(id, name) {
-    const response = await api.put(`/locations/${id}`, { name })
+  async function updateLocation(id, data) {
+    // Support both string (name only) and object (name + window_orientation)
+    const body = typeof data === 'string' ? { name: data } : data
+    const response = await api.put(`/locations/${id}`, body)
     const index = locations.value.findIndex(l => l.id === id)
     if (index !== -1) {
       locations.value[index] = response.location

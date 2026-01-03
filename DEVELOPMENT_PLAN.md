@@ -1,6 +1,6 @@
 # Sunwise - Personal Plant Manager
 
-**Current Version:** 0.2.0
+**Current Version:** 0.3.0
 
 ## Versioning
 - **Major (X.0.0):** Full rewrites or breaking changes
@@ -525,12 +525,12 @@ cd api && php -S localhost:8080
 ### Planned Features (Priority Order)
 | Feature | Description | Status |
 |---------|-------------|--------|
-| Daily task email | Configurable daily digest email with user-selectable send time | Planned |
-| SMS notifications | User-provided 3rd party API key (Twilio, etc.) for SMS alerts | Planned |
-| Plant name generator | Dice roll button for fun, quirky, nonsensical plant names | Planned |
-| Window orientation | Set north/south/east/west facing for each plant location | Planned |
-| Public plant gallery | Shareable URL showing all user's plants (privacy optional) | Planned |
-| AI species picker | After adding plant, AI shows multiple species with confidence % in modal for user to select | Planned |
+| Daily task email | Configurable daily digest email with user-selectable send time | Done (v0.3.0) |
+| SMS notifications | User-provided 3rd party API key (Twilio, etc.) for SMS alerts | Done (v0.3.0) |
+| Plant name generator | Dice roll button for fun, quirky, nonsensical plant names | Done (v0.3.0) |
+| Window orientation | Set north/south/east/west facing for each plant location | Done (v0.3.0) |
+| Public plant gallery | Shareable URL showing all user's plants (privacy optional) | Done (v0.3.0) |
+| AI species picker | After adding plant, AI shows multiple species with confidence % in modal for user to select | Done (v0.3.0) |
 
 ### Enhancement Suggestions
 
@@ -685,6 +685,24 @@ api/cron/
 ---
 
 ## Changelog
+
+### v0.3.0 (2026-01-03)
+**Features:**
+- Daily email digest with configurable send time in settings
+- SMS notifications with user-provided Twilio API credentials
+- Plant name generator with dice roll button - generates fun/quirky/nonsensical names
+- Window orientation setting for locations (north/south/east/west facing)
+- Public plant gallery with shareable URL token
+- AI species picker modal - after adding plant, choose from multiple species candidates
+- Location management panel in Plants view with edit/delete and orientation settings
+
+**Backend:**
+- New migration (004) for email digest, SMS, gallery, and species fields
+- PlantNameGenerator service with extensive curated name lists
+- GalleryController for public gallery viewing (no auth)
+- Updated ClaudeService to return species candidates with confidence levels
+- Updated SettingsController with notification and gallery settings endpoints
+- Updated LocationController with window_orientation support
 
 ### v0.2.0 (2026-01-03)
 **Features:**

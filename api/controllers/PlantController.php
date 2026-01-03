@@ -191,6 +191,55 @@ class PlantController
     }
 
     /**
+     * Generate a fun plant name
+     */
+    public function generateName(array $params, array $body, ?int $userId): array
+    {
+        $count = min((int)($body['count'] ?? $_GET['count'] ?? 5), 10);
+        $names = PlantNameGenerator::generateMultiple($count);
+
+        return ['names' => $names];
+    }
+
+    /**
+     * Confirm species selection from AI candidates
+     */
+    public function confirmSpecies(array $params, array $body, ?int $userId): array
+    {
+        $plantId = $params['id'];
+        $species = $body['species'] ?? null;
+
+        if (!$species) {
+            return ['status' => 400, 'data' => ['error' => 'Species is required']];
+        }
+
+        // Verify ownership
+        $stmt = db()->prepare('SELECT id FROM plants WHERE id = ? AND user_id = ?');
+        $stmt->execute([$plantId, $userId]);
+        if (!$stmt->fetch()) {
+            return ['status' => 404, 'data' => ['error' => 'Plant not found']];
+        }
+
+        // Update species and mark as confirmed
+        $stmt = db()->prepare('
+            UPDATE plants
+            SET species = ?, species_confirmed = 1
+            WHERE id = ?
+        ');
+        $stmt->execute([$species, $plantId]);
+
+        // Regenerate care plan with confirmed species
+        try {
+            $carePlanController = new CarePlanController();
+            $carePlanController->generateCarePlan($plantId);
+        } catch (Exception $e) {
+            error_log('Failed to regenerate care plan: ' . $e->getMessage());
+        }
+
+        return ['message' => 'Species confirmed', 'species' => $species];
+    }
+
+    /**
      * Trigger AI identification (async in future, sync for now)
      */
     private function triggerAIIdentification(int $plantId, int $photoId, string $filename): void
@@ -202,16 +251,23 @@ class PlantController
             $result = $claudeService->identifyPlant($imagePath);
 
             if ($result) {
+                // Store species candidates if multiple possibilities
+                $candidates = $result['candidates'] ?? null;
+                $candidatesJson = $candidates ? json_encode($candidates) : null;
+
                 // Update plant with identified species
                 $stmt = db()->prepare('
                     UPDATE plants
-                    SET species = ?, species_confidence = ?, health_status = ?, last_health_check = datetime("now")
+                    SET species = ?, species_confidence = ?, health_status = ?,
+                        last_health_check = datetime("now"), species_candidates = ?,
+                        species_confirmed = 0
                     WHERE id = ?
                 ');
                 $stmt->execute([
                     $result['species'] ?? null,
                     $result['confidence'] ?? null,
                     $result['health_status'] ?? 'unknown',
+                    $candidatesJson,
                     $plantId
                 ]);
 

@@ -22,11 +22,39 @@ const openaiKeyInput = ref('')
 const showClaudeInput = ref(false)
 const showOpenaiInput = ref(false)
 
+// Notification settings
+const notificationSettings = ref(null)
+const notificationLoading = ref(true)
+const savingNotification = ref(false)
+
+// Email digest form
+const emailDigestEnabled = ref(false)
+const emailDigestTime = ref('08:00')
+
+// SMS form
+const smsEnabled = ref(false)
+const smsPhone = ref('')
+const twilioSid = ref('')
+const twilioToken = ref('')
+const twilioPhone = ref('')
+const showSmsSetup = ref(false)
+
+// Public gallery
+const gallerySettings = ref(null)
+const galleryLoading = ref(true)
+const savingGallery = ref(false)
+const galleryEnabled = ref(false)
+const galleryName = ref('')
+
 onMounted(async () => {
   if ('Notification' in window && Notification.permission === 'granted') {
     notificationsEnabled.value = true
   }
-  await loadAiSettings()
+  await Promise.all([
+    loadAiSettings(),
+    loadNotificationSettings(),
+    loadGallerySettings()
+  ])
 })
 
 async function loadAiSettings() {
@@ -42,6 +70,36 @@ async function loadAiSettings() {
     }
   } finally {
     aiLoading.value = false
+  }
+}
+
+async function loadNotificationSettings() {
+  notificationLoading.value = true
+  try {
+    notificationSettings.value = await api.get('/settings/notifications')
+    emailDigestEnabled.value = !!notificationSettings.value.email_digest_enabled
+    emailDigestTime.value = notificationSettings.value.email_digest_time || '08:00'
+    smsEnabled.value = !!notificationSettings.value.sms_enabled
+    smsPhone.value = notificationSettings.value.sms_phone || ''
+    twilioPhone.value = notificationSettings.value.twilio_phone_number || ''
+    // Don't load tokens for security
+  } catch (e) {
+    console.error('Failed to load notification settings:', e)
+  } finally {
+    notificationLoading.value = false
+  }
+}
+
+async function loadGallerySettings() {
+  galleryLoading.value = true
+  try {
+    gallerySettings.value = await api.get('/settings/public-gallery')
+    galleryEnabled.value = !!gallerySettings.value.public_gallery_enabled
+    galleryName.value = gallerySettings.value.public_gallery_name || ''
+  } catch (e) {
+    console.error('Failed to load gallery settings:', e)
+  } finally {
+    galleryLoading.value = false
   }
 }
 
@@ -152,6 +210,66 @@ async function setDefaultProvider(provider) {
   }
 }
 
+async function saveEmailDigest() {
+  savingNotification.value = true
+  try {
+    await api.put('/settings/notifications/email-digest', {
+      enabled: emailDigestEnabled.value,
+      time: emailDigestTime.value
+    })
+    window.$toast?.success('Email digest settings saved!')
+  } catch (e) {
+    window.$toast?.error(e.message || 'Failed to save settings')
+  } finally {
+    savingNotification.value = false
+  }
+}
+
+async function saveSmsSettings() {
+  savingNotification.value = true
+  try {
+    await api.put('/settings/notifications/sms', {
+      enabled: smsEnabled.value,
+      phone: smsPhone.value,
+      twilio_sid: twilioSid.value || undefined,
+      twilio_token: twilioToken.value || undefined,
+      twilio_phone: twilioPhone.value
+    })
+    window.$toast?.success('SMS settings saved!')
+    showSmsSetup.value = false
+    twilioSid.value = ''
+    twilioToken.value = ''
+    await loadNotificationSettings()
+  } catch (e) {
+    window.$toast?.error(e.message || 'Failed to save settings')
+  } finally {
+    savingNotification.value = false
+  }
+}
+
+async function saveGallerySettings() {
+  savingGallery.value = true
+  try {
+    const response = await api.put('/settings/public-gallery', {
+      enabled: galleryEnabled.value,
+      name: galleryName.value
+    })
+    gallerySettings.value = response
+    window.$toast?.success('Gallery settings saved!')
+  } catch (e) {
+    window.$toast?.error(e.message || 'Failed to save settings')
+  } finally {
+    savingGallery.value = false
+  }
+}
+
+function copyGalleryLink() {
+  if (!gallerySettings.value?.public_gallery_token) return
+  const url = `${window.location.origin}/gallery/${gallerySettings.value.public_gallery_token}`
+  navigator.clipboard.writeText(url)
+  window.$toast?.success('Link copied to clipboard!')
+}
+
 function logout() {
   auth.logout()
   router.push('/login')
@@ -159,6 +277,10 @@ function logout() {
 
 const canSetClaudeDefault = computed(() => aiSettings.value?.has_claude_key)
 const canSetOpenaiDefault = computed(() => aiSettings.value?.has_openai_key)
+const galleryUrl = computed(() => {
+  if (!gallerySettings.value?.public_gallery_token) return null
+  return `${window.location.origin}/gallery/${gallerySettings.value.public_gallery_token}`
+})
 </script>
 
 <template>
@@ -345,13 +467,13 @@ const canSetOpenaiDefault = computed(() => aiSettings.value?.has_openai_key)
       </div>
     </div>
 
-    <!-- Notifications -->
+    <!-- Push Notifications -->
     <div class="card p-4 mb-6">
-      <h2 class="font-semibold text-gray-900 mb-3">Notifications</h2>
+      <h2 class="font-semibold text-gray-900 mb-3">Push Notifications</h2>
 
       <div class="flex items-center justify-between">
         <div>
-          <p class="font-medium text-gray-900">Push Notifications</p>
+          <p class="font-medium text-gray-900">Browser Notifications</p>
           <p class="text-sm text-gray-500">Get reminders for plant care tasks</p>
         </div>
         <button
@@ -368,6 +490,228 @@ const canSetOpenaiDefault = computed(() => aiSettings.value?.has_openai_key)
       </div>
     </div>
 
+    <!-- Email Digest -->
+    <div class="card p-4 mb-6">
+      <h2 class="font-semibold text-gray-900 mb-3">Daily Email Digest</h2>
+
+      <div v-if="notificationLoading" class="flex justify-center py-4">
+        <div class="w-6 h-6 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+
+      <div v-else class="space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="font-medium text-gray-900">Enable Daily Digest</p>
+            <p class="text-sm text-gray-500">Receive daily task summary via email</p>
+          </div>
+          <button
+            @click="emailDigestEnabled = !emailDigestEnabled"
+            class="relative w-12 h-7 rounded-full transition-colors"
+            :class="emailDigestEnabled ? 'bg-plant-500' : 'bg-gray-300'"
+          >
+            <span
+              class="absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform"
+              :class="emailDigestEnabled ? 'left-6' : 'left-1'"
+            ></span>
+          </button>
+        </div>
+
+        <div v-if="emailDigestEnabled" class="space-y-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Send Time</label>
+            <input
+              v-model="emailDigestTime"
+              type="time"
+              class="input"
+            >
+            <p class="text-xs text-gray-500 mt-1">Time when daily digest will be sent</p>
+          </div>
+
+          <button
+            @click="saveEmailDigest"
+            :disabled="savingNotification"
+            class="btn-primary text-sm px-4 py-2"
+          >
+            <span v-if="savingNotification" class="flex items-center gap-1">
+              <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              Saving...
+            </span>
+            <span v-else>Save Email Settings</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SMS Notifications -->
+    <div class="card p-4 mb-6">
+      <h2 class="font-semibold text-gray-900 mb-3">SMS Notifications</h2>
+
+      <div v-if="notificationLoading" class="flex justify-center py-4">
+        <div class="w-6 h-6 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+
+      <div v-else class="space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="font-medium text-gray-900">Enable SMS Alerts</p>
+            <p class="text-sm text-gray-500">Requires your own Twilio account</p>
+          </div>
+          <button
+            @click="smsEnabled = !smsEnabled"
+            class="relative w-12 h-7 rounded-full transition-colors"
+            :class="smsEnabled ? 'bg-plant-500' : 'bg-gray-300'"
+          >
+            <span
+              class="absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform"
+              :class="smsEnabled ? 'left-6' : 'left-1'"
+            ></span>
+          </button>
+        </div>
+
+        <div v-if="smsEnabled" class="space-y-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Your Phone Number</label>
+            <input
+              v-model="smsPhone"
+              type="tel"
+              class="input"
+              placeholder="+1 555 123 4567"
+            >
+          </div>
+
+          <div v-if="notificationSettings?.has_twilio_credentials && !showSmsSetup">
+            <p class="text-sm text-green-600 flex items-center gap-1">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+              </svg>
+              Twilio credentials configured
+            </p>
+            <button @click="showSmsSetup = true" class="text-sm text-plant-600 hover:underline mt-1">
+              Update credentials
+            </button>
+          </div>
+
+          <div v-else class="space-y-3 p-3 bg-gray-50 rounded-xl">
+            <p class="text-sm font-medium text-gray-700">Twilio API Credentials</p>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Account SID</label>
+              <input
+                v-model="twilioSid"
+                type="text"
+                class="input text-sm"
+                placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              >
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Auth Token</label>
+              <input
+                v-model="twilioToken"
+                type="password"
+                class="input text-sm"
+                placeholder="Your Twilio auth token"
+              >
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Twilio Phone Number</label>
+              <input
+                v-model="twilioPhone"
+                type="tel"
+                class="input text-sm"
+                placeholder="+1 555 000 0000"
+              >
+            </div>
+            <p class="text-xs text-gray-500">
+              Get your credentials at
+              <a href="https://www.twilio.com/console" target="_blank" class="text-plant-600 hover:underline">
+                twilio.com/console
+              </a>
+            </p>
+          </div>
+
+          <button
+            @click="saveSmsSettings"
+            :disabled="savingNotification"
+            class="btn-primary text-sm px-4 py-2"
+          >
+            <span v-if="savingNotification" class="flex items-center gap-1">
+              <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              Saving...
+            </span>
+            <span v-else>Save SMS Settings</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Public Gallery -->
+    <div class="card p-4 mb-6">
+      <h2 class="font-semibold text-gray-900 mb-3">Public Plant Gallery</h2>
+
+      <div v-if="galleryLoading" class="flex justify-center py-4">
+        <div class="w-6 h-6 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+
+      <div v-else class="space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="font-medium text-gray-900">Enable Public Gallery</p>
+            <p class="text-sm text-gray-500">Share your plants with a public link</p>
+          </div>
+          <button
+            @click="galleryEnabled = !galleryEnabled"
+            class="relative w-12 h-7 rounded-full transition-colors"
+            :class="galleryEnabled ? 'bg-plant-500' : 'bg-gray-300'"
+          >
+            <span
+              class="absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform"
+              :class="galleryEnabled ? 'left-6' : 'left-1'"
+            ></span>
+          </button>
+        </div>
+
+        <div v-if="galleryEnabled" class="space-y-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Gallery Name</label>
+            <input
+              v-model="galleryName"
+              type="text"
+              class="input"
+              placeholder="My Plant Collection"
+            >
+          </div>
+
+          <div v-if="gallerySettings?.public_gallery_token" class="p-3 bg-gray-50 rounded-xl">
+            <p class="text-sm font-medium text-gray-700 mb-1">Your Gallery Link</p>
+            <div class="flex items-center gap-2">
+              <input
+                :value="galleryUrl"
+                readonly
+                class="input text-sm flex-1 bg-white"
+              >
+              <button
+                @click="copyGalleryLink"
+                class="btn-secondary text-sm px-3 py-2"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+
+          <button
+            @click="saveGallerySettings"
+            :disabled="savingGallery"
+            class="btn-primary text-sm px-4 py-2"
+          >
+            <span v-if="savingGallery" class="flex items-center gap-1">
+              <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              Saving...
+            </span>
+            <span v-else>Save Gallery Settings</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- App info -->
     <div class="card p-4 mb-6">
       <h2 class="font-semibold text-gray-900 mb-3">About</h2>
@@ -375,7 +719,7 @@ const canSetOpenaiDefault = computed(() => aiSettings.value?.has_openai_key)
       <div class="space-y-3 text-sm">
         <div class="flex justify-between">
           <span class="text-gray-500">Version</span>
-          <span class="text-gray-900">0.2.0</span>
+          <span class="text-gray-900">0.3.0</span>
         </div>
         <div class="flex justify-between">
           <span class="text-gray-500">AI Providers</span>
