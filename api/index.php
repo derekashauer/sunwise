@@ -33,6 +33,17 @@ require_once __DIR__ . '/config/database.php';
 
 // Autoload classes
 spl_autoload_register(function ($class) {
+    // Handle classes that share a file
+    $classMap = [
+        'AIServiceFactory' => __DIR__ . '/services/AIService.php',
+        'AIServiceInterface' => __DIR__ . '/services/AIService.php',
+    ];
+
+    if (isset($classMap[$class])) {
+        require_once $classMap[$class];
+        return;
+    }
+
     $paths = [
         __DIR__ . '/controllers/',
         __DIR__ . '/services/',
