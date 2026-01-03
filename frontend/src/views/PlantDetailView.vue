@@ -22,6 +22,8 @@ const showPhotoUpload = ref(false)
 const uploadingPhoto = ref(false)
 const showDeleteConfirm = ref(false)
 const showChat = ref(false)
+const showHealthPicker = ref(false)
+const updatingHealth = ref(false)
 
 const healthColors = {
   thriving: 'bg-green-100 text-green-700',
@@ -120,6 +122,27 @@ async function refreshPlant() {
     console.error('Failed to refresh plant:', e)
   }
 }
+
+const healthOptions = [
+  { value: 'thriving', label: 'Thriving', emoji: '🌟', desc: 'Growing vigorously' },
+  { value: 'healthy', label: 'Healthy', emoji: '✅', desc: 'Doing well' },
+  { value: 'struggling', label: 'Struggling', emoji: '⚠️', desc: 'Needs attention' },
+  { value: 'critical', label: 'Critical', emoji: '🚨', desc: 'Urgent care needed' }
+]
+
+async function updateHealthStatus(status) {
+  updatingHealth.value = true
+  try {
+    await plants.updatePlant(route.params.id, { health_status: status })
+    plant.value.health_status = status
+    showHealthPicker.value = false
+    window.$toast?.success('Health status updated')
+  } catch (e) {
+    window.$toast?.error(e.message || 'Failed to update health status')
+  } finally {
+    updatingHealth.value = false
+  }
+}
 </script>
 
 <template>
@@ -181,14 +204,17 @@ async function refreshPlant() {
           </svg>
         </div>
 
-        <!-- Health badge -->
-        <span
-          v-if="plant.health_status"
-          class="absolute top-3 right-3 px-3 py-1 text-sm font-medium rounded-full capitalize"
-          :class="healthColors[plant.health_status]"
+        <!-- Health badge (clickable to change) -->
+        <button
+          @click="showHealthPicker = true"
+          class="absolute top-3 right-3 px-3 py-1 text-sm font-medium rounded-full capitalize flex items-center gap-1 shadow-sm"
+          :class="healthColors[plant.health_status] || 'bg-gray-100 text-gray-500'"
         >
-          {{ plant.health_status }}
-        </span>
+          {{ plant.health_status || 'Set status' }}
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
 
         <!-- Add photo button -->
         <button
@@ -342,5 +368,39 @@ async function refreshPlant() {
       @close="showChat = false"
       @plant-updated="refreshPlant"
     />
+
+    <!-- Health status picker modal -->
+    <div v-if="showHealthPicker" class="fixed inset-0 bg-black/50 flex items-end justify-center z-50">
+      <div class="bg-white rounded-t-3xl w-full max-w-lg p-6 safe-bottom">
+        <h3 class="text-lg font-semibold mb-4">Update Health Status</h3>
+        <p class="text-gray-500 text-sm mb-4">How is {{ plant?.name }} doing?</p>
+
+        <div class="space-y-2 mb-4">
+          <button
+            v-for="option in healthOptions"
+            :key="option.value"
+            @click="updateHealthStatus(option.value)"
+            :disabled="updatingHealth"
+            class="w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all text-left"
+            :class="plant?.health_status === option.value
+              ? 'border-plant-500 bg-plant-50'
+              : 'border-gray-200 hover:border-gray-300'"
+          >
+            <span class="text-2xl">{{ option.emoji }}</span>
+            <div class="flex-1">
+              <p class="font-medium text-gray-900">{{ option.label }}</p>
+              <p class="text-sm text-gray-500">{{ option.desc }}</p>
+            </div>
+            <svg v-if="plant?.health_status === option.value" class="w-5 h-5 text-plant-500" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+            </svg>
+          </button>
+        </div>
+
+        <button @click="showHealthPicker = false" class="btn-secondary w-full">
+          Cancel
+        </button>
+      </div>
+    </div>
   </div>
 </template>

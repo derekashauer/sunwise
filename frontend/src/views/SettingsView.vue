@@ -51,6 +51,18 @@ async function toggleNotifications() {
     return
   }
 
+  // Check if notifications are supported
+  if (!('Notification' in window)) {
+    window.$toast?.error('Notifications not supported on this device/browser')
+    return
+  }
+
+  // Check if already denied
+  if (Notification.permission === 'denied') {
+    window.$toast?.error('Notifications were previously blocked. Enable in browser settings.')
+    return
+  }
+
   notificationsLoading.value = true
   try {
     const permission = await Notification.requestPermission()
@@ -61,7 +73,8 @@ async function toggleNotifications() {
       window.$toast?.error('Notifications permission denied')
     }
   } catch (e) {
-    window.$toast?.error('Failed to enable notifications')
+    console.error('Notification error:', e)
+    window.$toast?.error('Failed to enable notifications: ' + (e.message || 'Unknown error'))
   } finally {
     notificationsLoading.value = false
   }

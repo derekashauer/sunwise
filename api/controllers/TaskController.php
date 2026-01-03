@@ -50,6 +50,9 @@ class TaskController
             SELECT t.*,
                    p.name as plant_name,
                    p.location as plant_location,
+                   p.species as species,
+                   p.pot_size as pot_size,
+                   p.soil_type as soil_type,
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail
             FROM tasks t
             JOIN plants p ON t.plant_id = p.id
