@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useTasksStore } from '@/stores/tasks'
+import { useApi } from '@/composables/useApi'
 
 const props = defineProps({
   task: { type: Object, required: true },
@@ -10,8 +11,12 @@ const props = defineProps({
 })
 
 const tasks = useTasksStore()
+const api = useApi()
 const loading = ref(false)
 const expanded = ref(false)
+const loadingRecs = ref(false)
+const recommendations = ref(null)
+const recError = ref(null)
 
 const taskIcons = {
   water: '💧',
@@ -23,175 +28,28 @@ const taskIcons = {
   check: '👀'
 }
 
-// Care recommendations based on task type and plant properties
-const careRecommendations = computed(() => {
-  const taskType = props.task.task_type
-  const potSize = props.plant?.pot_size || props.task.pot_size || 'medium'
-  const species = props.plant?.species || props.task.species || ''
-  const soilType = props.plant?.soil_type || props.task.soil_type || 'standard'
+async function toggleExpand() {
+  expanded.value = !expanded.value
 
-  const recommendations = {
-    water: getWateringTips(potSize, species, soilType),
-    fertilize: getFertilizingTips(potSize, species),
-    trim: getTrimmingTips(species),
-    repot: getRepottingTips(potSize, species),
-    rotate: getRotatingTips(),
-    mist: getMistingTips(species),
-    check: getCheckTips()
+  // Fetch recommendations when first expanding
+  if (expanded.value && !recommendations.value && !loadingRecs.value) {
+    await fetchRecommendations()
   }
-
-  return recommendations[taskType] || null
-})
-
-function getWateringTips(potSize, species, soilType) {
-  const amounts = {
-    small: '~100-200ml (half cup)',
-    medium: '~300-500ml (1-2 cups)',
-    large: '~500-750ml (2-3 cups)',
-    xlarge: '~1-1.5 liters'
-  }
-
-  let tips = [`<strong>Amount:</strong> ${amounts[potSize] || amounts.medium}`]
-
-  // Species-specific tips
-  const speciesLower = species.toLowerCase()
-  if (speciesLower.includes('succulent') || speciesLower.includes('cactus') || speciesLower.includes('aloe')) {
-    tips.push('<strong>Method:</strong> Soak thoroughly, let drain completely. Wait until soil is bone dry before next watering.')
-  } else if (speciesLower.includes('fern') || speciesLower.includes('calathea') || speciesLower.includes('prayer')) {
-    tips.push('<strong>Method:</strong> Keep soil consistently moist but not soggy. Use room temperature water.')
-  } else if (speciesLower.includes('orchid')) {
-    tips.push('<strong>Method:</strong> Water roots thoroughly, let drain. Ice cube method works for phalaenopsis.')
-  } else if (speciesLower.includes('monstera') || speciesLower.includes('philodendron') || speciesLower.includes('pothos')) {
-    tips.push('<strong>Method:</strong> Water when top 1-2 inches are dry. These like to dry out slightly between waterings.')
-  } else if (speciesLower.includes('fiddle') || speciesLower.includes('ficus')) {
-    tips.push('<strong>Method:</strong> Water when top inch is dry. Be consistent - they hate schedule changes.')
-  } else {
-    tips.push('<strong>Method:</strong> Water until it drains from bottom. Empty saucer after 30 minutes.')
-  }
-
-  if (soilType === 'succulent') {
-    tips.push('<strong>Soil note:</strong> Fast-draining mix means water will run through quickly - that\'s normal.')
-  }
-
-  tips.push('<strong>Finger test:</strong> Insert finger 1-2 inches deep - if dry, it\'s time to water.')
-  tips.push('<strong>Moisture meter:</strong> Insert probe halfway into pot. Water when reading is 2-3 (most plants) or 1 (succulents/cacti).')
-
-  return tips
 }
 
-function getFertilizingTips(potSize, species) {
-  const amounts = {
-    small: '1/4 strength solution',
-    medium: '1/2 strength solution',
-    large: '1/2 to full strength',
-    xlarge: 'Full strength'
+async function fetchRecommendations() {
+  loadingRecs.value = true
+  recError.value = null
+
+  try {
+    const response = await api.get(`/tasks/${props.task.id}/recommendations`)
+    recommendations.value = response.recommendations
+  } catch (e) {
+    recError.value = e.message || 'Failed to load recommendations'
+    console.error('Failed to fetch recommendations:', e)
+  } finally {
+    loadingRecs.value = false
   }
-
-  let tips = [`<strong>Amount:</strong> ${amounts[potSize] || amounts.medium}`]
-
-  const speciesLower = species.toLowerCase()
-  if (speciesLower.includes('succulent') || speciesLower.includes('cactus')) {
-    tips.push('<strong>Type:</strong> Use cactus/succulent fertilizer (low nitrogen). Only fertilize during growing season.')
-  } else if (speciesLower.includes('orchid')) {
-    tips.push('<strong>Type:</strong> Use orchid-specific fertilizer. "Weekly, weakly" approach works best.')
-  } else if (speciesLower.includes('fern')) {
-    tips.push('<strong>Type:</strong> Use balanced liquid fertilizer at half strength. Ferns are light feeders.')
-  } else {
-    tips.push('<strong>Type:</strong> Balanced liquid fertilizer (10-10-10 or similar). Dilute according to package.')
-  }
-
-  tips.push('<strong>When:</strong> Apply to moist soil, never dry. Water lightly first if soil is dry.')
-  tips.push('<strong>Tip:</strong> Skip fertilizing in winter when growth slows.')
-
-  return tips
-}
-
-function getTrimmingTips(species) {
-  let tips = []
-
-  const speciesLower = species.toLowerCase()
-  if (speciesLower.includes('pothos') || speciesLower.includes('philodendron')) {
-    tips.push('<strong>Where:</strong> Cut just above a node (bump on stem). This encourages branching.')
-    tips.push('<strong>Tip:</strong> Cuttings can be propagated in water!')
-  } else if (speciesLower.includes('ficus') || speciesLower.includes('rubber')) {
-    tips.push('<strong>Caution:</strong> Wipe milky sap with damp cloth - it can irritate skin.')
-    tips.push('<strong>Where:</strong> Cut back to a node or leaf. New growth will emerge below cut.')
-  } else if (speciesLower.includes('succulent')) {
-    tips.push('<strong>Method:</strong> Remove dead/dried lower leaves by gently pulling downward.')
-    tips.push('<strong>Tip:</strong> Healthy leaves removed can be propagated!')
-  } else {
-    tips.push('<strong>Tools:</strong> Use clean, sharp scissors or pruning shears.')
-    tips.push('<strong>What to remove:</strong> Yellow/brown leaves, leggy growth, dead stems.')
-  }
-
-  tips.push('<strong>Hygiene:</strong> Clean tools with rubbing alcohol between plants to prevent disease spread.')
-
-  return tips
-}
-
-function getRepottingTips(potSize, species) {
-  const newSizes = {
-    small: 'medium (1-2 inches larger diameter)',
-    medium: 'large (1-2 inches larger diameter)',
-    large: 'xlarge (2-3 inches larger diameter)',
-    xlarge: 'same size with fresh soil, or divide'
-  }
-
-  let tips = [`<strong>New pot:</strong> ${newSizes[potSize] || 'Go up 1-2 inches in diameter'}`]
-
-  const speciesLower = species.toLowerCase()
-  if (speciesLower.includes('succulent') || speciesLower.includes('cactus')) {
-    tips.push('<strong>Soil:</strong> Cactus/succulent mix. Add extra perlite for drainage.')
-  } else if (speciesLower.includes('orchid')) {
-    tips.push('<strong>Soil:</strong> Orchid bark mix only - never regular potting soil!')
-  } else if (speciesLower.includes('fern')) {
-    tips.push('<strong>Soil:</strong> Peat-based mix with good moisture retention.')
-  } else {
-    tips.push('<strong>Soil:</strong> Quality potting mix. Add perlite for drainage if needed.')
-  }
-
-  tips.push('<strong>Process:</strong> Water 1-2 days before repotting. Gently loosen root ball.')
-  tips.push('<strong>After:</strong> Water thoroughly and keep in indirect light for a week while it adjusts.')
-
-  return tips
-}
-
-function getRotatingTips() {
-  return [
-    '<strong>How much:</strong> Rotate 1/4 turn (90 degrees).',
-    '<strong>Why:</strong> Ensures even light exposure for balanced growth.',
-    '<strong>Frequency:</strong> Every watering or weekly for best results.',
-    '<strong>Tip:</strong> Mark the pot so you remember which way to turn.'
-  ]
-}
-
-function getMistingTips(species) {
-  let tips = ['<strong>When:</strong> Morning is best - leaves dry before evening.']
-
-  const speciesLower = species.toLowerCase()
-  if (speciesLower.includes('fern') || speciesLower.includes('calathea') || speciesLower.includes('prayer')) {
-    tips.push('<strong>Frequency:</strong> Daily or every other day. These love humidity!')
-  } else if (speciesLower.includes('succulent') || speciesLower.includes('cactus')) {
-    tips.push('<strong>Caution:</strong> Skip misting! These prefer dry conditions.')
-    return tips
-  } else {
-    tips.push('<strong>Frequency:</strong> 2-3 times per week, more in dry/heated rooms.')
-  }
-
-  tips.push('<strong>Method:</strong> Use room temperature water. Mist around and above the plant.')
-  tips.push('<strong>Alternative:</strong> Pebble tray with water works great for constant humidity.')
-
-  return tips
-}
-
-function getCheckTips() {
-  return [
-    '<strong>Inspect:</strong> Look under leaves for pests (tiny dots, webs, sticky residue).',
-    '<strong>Feel soil:</strong> Check moisture level 1-2 inches deep.',
-    '<strong>New growth:</strong> Look for new leaves or stems emerging.',
-    '<strong>Problem signs:</strong> Yellowing, browning tips, drooping, or spots.',
-    '<strong>Tip:</strong> Take a photo to track changes over time!'
-  ]
 }
 
 async function complete() {
@@ -251,14 +109,14 @@ async function complete() {
 
         <!-- Expand/collapse button for recommendations -->
         <button
-          v-if="showRecommendations && careRecommendations && !completed"
-          @click="expanded = !expanded"
+          v-if="showRecommendations && !completed"
+          @click="toggleExpand"
           class="mt-2 text-xs text-plant-600 hover:text-plant-700 font-medium flex items-center gap-1"
         >
           <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': expanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
           </svg>
-          {{ expanded ? 'Hide' : 'Show' }} care tips
+          {{ expanded ? 'Hide' : 'How to do this' }}
         </button>
       </div>
 
@@ -268,18 +126,71 @@ async function complete() {
       </div>
     </div>
 
-    <!-- Care recommendations (expandable) -->
-    <div v-if="expanded && careRecommendations" class="px-4 pb-4 pt-0">
-      <div class="bg-plant-50 rounded-xl p-3 text-sm space-y-2 border border-plant-100">
-        <p class="font-medium text-plant-800 flex items-center gap-1">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    <!-- AI Recommendations (expandable) -->
+    <div v-if="expanded" class="px-4 pb-4 pt-0">
+      <!-- Loading state -->
+      <div v-if="loadingRecs" class="bg-plant-50 rounded-xl p-4 border border-plant-100">
+        <div class="flex items-center gap-3">
+          <div class="w-5 h-5 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+          <span class="text-sm text-plant-700">Getting personalized care tips...</span>
+        </div>
+      </div>
+
+      <!-- Error state -->
+      <div v-else-if="recError" class="bg-red-50 rounded-xl p-4 border border-red-100">
+        <p class="text-sm text-red-700">{{ recError }}</p>
+        <button @click="fetchRecommendations" class="mt-2 text-xs text-red-600 underline">Try again</button>
+      </div>
+
+      <!-- Recommendations -->
+      <div v-else-if="recommendations" class="bg-plant-50 rounded-xl p-4 border border-plant-100 space-y-3">
+        <!-- AI badge -->
+        <div class="flex items-center gap-2 text-xs text-plant-600">
+          <svg v-if="recommendations.source === 'ai'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
           </svg>
-          Care Tips
-        </p>
-        <ul class="space-y-1.5 text-gray-700">
-          <li v-for="(tip, index) in careRecommendations" :key="index" class="leading-snug" v-html="tip"></li>
-        </ul>
+          <span>{{ recommendations.source === 'ai' ? 'AI-personalized for ' + (plant?.name || task.plant_name) : 'Care tips' }}</span>
+        </div>
+
+        <!-- Summary -->
+        <p class="font-medium text-gray-800">{{ recommendations.summary }}</p>
+
+        <!-- Amount/Timing -->
+        <div v-if="recommendations.amount || recommendations.timing" class="flex flex-wrap gap-2 text-xs">
+          <span v-if="recommendations.amount" class="bg-white px-2 py-1 rounded-lg border border-plant-200">
+            📏 {{ recommendations.amount }}
+          </span>
+          <span v-if="recommendations.timing" class="bg-white px-2 py-1 rounded-lg border border-plant-200">
+            ⏰ {{ recommendations.timing }}
+          </span>
+        </div>
+
+        <!-- Steps -->
+        <div v-if="recommendations.steps?.length" class="space-y-2">
+          <p class="text-xs font-medium text-gray-600 uppercase tracking-wide">Steps</p>
+          <ol class="space-y-1.5 text-sm text-gray-700">
+            <li v-for="(step, index) in recommendations.steps" :key="index" class="flex gap-2">
+              <span class="flex-shrink-0 w-5 h-5 bg-plant-200 text-plant-800 rounded-full text-xs flex items-center justify-center font-medium">{{ index + 1 }}</span>
+              <span>{{ step }}</span>
+            </li>
+          </ol>
+        </div>
+
+        <!-- Warnings -->
+        <div v-if="recommendations.warnings?.length" class="bg-yellow-50 rounded-lg p-3 border border-yellow-200">
+          <p class="text-xs font-medium text-yellow-800 mb-1">⚠️ Watch out</p>
+          <ul class="space-y-1 text-sm text-yellow-700">
+            <li v-for="(warning, index) in recommendations.warnings" :key="index">{{ warning }}</li>
+          </ul>
+        </div>
+
+        <!-- Tips -->
+        <div v-if="recommendations.tips?.length" class="text-sm text-gray-600">
+          <p class="text-xs font-medium text-gray-500 mb-1">💡 Tips</p>
+          <ul class="space-y-1">
+            <li v-for="(tip, index) in recommendations.tips" :key="index">{{ tip }}</li>
+          </ul>
+        </div>
       </div>
     </div>
   </div>

@@ -194,6 +194,421 @@ class TaskController
     }
 
     /**
+     * Get AI-generated recommendations for a specific task
+     */
+    public function recommendations(array $params, array $body, ?int $userId): array
+    {
+        $taskId = $params['id'];
+
+        // Get task with full plant details
+        $stmt = db()->prepare('
+            SELECT t.*,
+                   p.id as plant_id,
+                   p.name as plant_name,
+                   p.species,
+                   p.pot_size,
+                   p.soil_type,
+                   p.light_condition,
+                   p.health_status,
+                   p.notes as plant_notes,
+                   p.user_id,
+                   l.name as location_name,
+                   cp.watering_frequency,
+                   cp.fertilizing_frequency,
+                   cp.light_requirements,
+                   cp.humidity_preference,
+                   cp.temperature_range,
+                   cp.special_instructions
+            FROM tasks t
+            JOIN plants p ON t.plant_id = p.id
+            LEFT JOIN locations l ON p.location_id = l.id
+            LEFT JOIN care_plans cp ON cp.plant_id = p.id
+            WHERE t.id = ?
+        ');
+        $stmt->execute([$taskId]);
+        $task = $stmt->fetch();
+
+        if (!$task || $task['user_id'] != $userId) {
+            return ['status' => 404, 'data' => ['error' => 'Task not found']];
+        }
+
+        // Get recent care history for this plant
+        $stmt = db()->prepare('
+            SELECT action, performed_at, notes, outcome
+            FROM care_log
+            WHERE plant_id = ?
+            ORDER BY performed_at DESC
+            LIMIT 10
+        ');
+        $stmt->execute([$task['plant_id']]);
+        $careHistory = $stmt->fetchAll();
+
+        // Get recent health assessments from photos
+        $stmt = db()->prepare('
+            SELECT health_assessment, uploaded_at
+            FROM photos
+            WHERE plant_id = ? AND health_assessment IS NOT NULL
+            ORDER BY uploaded_at DESC
+            LIMIT 3
+        ');
+        $stmt->execute([$task['plant_id']]);
+        $healthHistory = $stmt->fetchAll();
+
+        // Try to get weather data (if location available)
+        $weather = $this->getWeatherContext();
+
+        // Generate AI recommendations
+        $recommendations = $this->generateAIRecommendations($task, $careHistory, $healthHistory, $weather);
+
+        return [
+            'recommendations' => $recommendations,
+            'task' => $task,
+            'weather' => $weather
+        ];
+    }
+
+    /**
+     * Get current weather context
+     */
+    private function getWeatherContext(): ?array
+    {
+        // For now, return seasonal context based on date
+        // Could integrate with weather API later
+        $month = (int)date('n');
+        $season = match(true) {
+            $month >= 3 && $month <= 5 => 'spring',
+            $month >= 6 && $month <= 8 => 'summer',
+            $month >= 9 && $month <= 11 => 'fall',
+            default => 'winter'
+        };
+
+        $seasonalContext = [
+            'spring' => [
+                'season' => 'spring',
+                'growth_phase' => 'active growth beginning',
+                'watering_adjustment' => 'gradually increase watering',
+                'fertilizing' => 'begin regular fertilizing',
+                'notes' => 'Plants are waking up from dormancy. Watch for new growth.'
+            ],
+            'summer' => [
+                'season' => 'summer',
+                'growth_phase' => 'peak growth',
+                'watering_adjustment' => 'water more frequently, check soil daily in heat',
+                'fertilizing' => 'continue regular fertilizing',
+                'notes' => 'High heat may stress plants. Watch for wilting.'
+            ],
+            'fall' => [
+                'season' => 'fall',
+                'growth_phase' => 'slowing growth',
+                'watering_adjustment' => 'gradually reduce watering',
+                'fertilizing' => 'reduce or stop fertilizing',
+                'notes' => 'Plants preparing for dormancy. Less water needed.'
+            ],
+            'winter' => [
+                'season' => 'winter',
+                'growth_phase' => 'dormancy or slow growth',
+                'watering_adjustment' => 'water sparingly, let soil dry more',
+                'fertilizing' => 'stop fertilizing for most plants',
+                'notes' => 'Low light and dry indoor air. Watch humidity.'
+            ]
+        ];
+
+        return $seasonalContext[$season];
+    }
+
+    /**
+     * Generate AI recommendations for the task
+     */
+    private function generateAIRecommendations(array $task, array $careHistory, array $healthHistory, ?array $weather): array
+    {
+        // Build context for AI
+        $context = $this->buildTaskContext($task, $careHistory, $healthHistory, $weather);
+
+        // Try to get AI service
+        try {
+            $aiService = $this->getAIService();
+            if ($aiService) {
+                return $this->callAIForRecommendations($aiService, $task, $context);
+            }
+        } catch (\Exception $e) {
+            error_log("AI recommendation error: " . $e->getMessage());
+        }
+
+        // Fallback to smart defaults if no AI available
+        return $this->generateFallbackRecommendations($task, $weather);
+    }
+
+    /**
+     * Build context string for AI
+     */
+    private function buildTaskContext(array $task, array $careHistory, array $healthHistory, ?array $weather): string
+    {
+        $context = "## Plant Information\n";
+        $context .= "- Name: {$task['plant_name']}\n";
+        $context .= "- Species: " . ($task['species'] ?: 'Unknown') . "\n";
+        $context .= "- Current Health: " . ($task['health_status'] ?: 'Unknown') . "\n";
+        $context .= "- Pot Size: " . ($task['pot_size'] ?: 'Medium') . "\n";
+        $context .= "- Soil Type: " . ($task['soil_type'] ?: 'Standard potting mix') . "\n";
+        $context .= "- Light Condition: " . ($task['light_condition'] ?: 'Unknown') . "\n";
+        $context .= "- Location: " . ($task['location_name'] ?: 'Unknown') . "\n";
+
+        if ($task['plant_notes']) {
+            $context .= "- Owner's Notes: {$task['plant_notes']}\n";
+        }
+
+        // Care plan details
+        if ($task['watering_frequency'] || $task['special_instructions']) {
+            $context .= "\n## Care Plan\n";
+            if ($task['watering_frequency']) $context .= "- Watering: every {$task['watering_frequency']} days\n";
+            if ($task['humidity_preference']) $context .= "- Humidity: {$task['humidity_preference']}\n";
+            if ($task['temperature_range']) $context .= "- Temperature: {$task['temperature_range']}\n";
+            if ($task['special_instructions']) $context .= "- Special Instructions: {$task['special_instructions']}\n";
+        }
+
+        // Recent care history
+        if (!empty($careHistory)) {
+            $context .= "\n## Recent Care History\n";
+            foreach (array_slice($careHistory, 0, 5) as $log) {
+                $date = date('M j', strtotime($log['performed_at']));
+                $context .= "- $date: {$log['action']}";
+                if ($log['notes']) $context .= " - {$log['notes']}";
+                if ($log['outcome']) $context .= " (outcome: {$log['outcome']})";
+                $context .= "\n";
+            }
+        }
+
+        // Health history from photos
+        if (!empty($healthHistory)) {
+            $context .= "\n## Recent Health Assessments\n";
+            foreach ($healthHistory as $assessment) {
+                $date = date('M j', strtotime($assessment['uploaded_at']));
+                $context .= "- $date: {$assessment['health_assessment']}\n";
+            }
+        }
+
+        // Weather/seasonal context
+        if ($weather) {
+            $context .= "\n## Current Conditions\n";
+            $context .= "- Season: {$weather['season']}\n";
+            $context .= "- Growth Phase: {$weather['growth_phase']}\n";
+            $context .= "- Seasonal Note: {$weather['notes']}\n";
+        }
+
+        return $context;
+    }
+
+    /**
+     * Get AI service instance
+     */
+    private function getAIService(): ?object
+    {
+        // Check if user has API keys configured
+        $stmt = db()->prepare('SELECT setting_value FROM user_settings WHERE setting_key IN (?, ?) LIMIT 1');
+        $stmt->execute(['claude_api_key', 'openai_api_key']);
+        $setting = $stmt->fetch();
+
+        if (!$setting) {
+            return null;
+        }
+
+        // Decrypt and create service
+        $encryptedKey = $setting['setting_value'];
+        $apiKey = EncryptionService::decrypt($encryptedKey);
+
+        // Determine which service based on key format
+        if (strpos($apiKey, 'sk-ant-') === 0) {
+            return new ClaudeService($apiKey);
+        } else {
+            return new OpenAIService($apiKey);
+        }
+    }
+
+    /**
+     * Call AI service for recommendations
+     */
+    private function callAIForRecommendations($aiService, array $task, string $context): array
+    {
+        $taskType = $task['task_type'];
+        $plantName = $task['plant_name'];
+
+        $prompt = "You are a plant care expert. Based on the following information about \"$plantName\", provide specific, actionable recommendations for the upcoming $taskType task.
+
+$context
+
+## Task Details
+- Task Type: $taskType
+- Due Date: {$task['due_date']}
+- Priority: " . ($task['priority'] ?: 'normal') . "
+" . ($task['instructions'] ? "- Current Instructions: {$task['instructions']}\n" : "") . "
+
+Please provide personalized recommendations in the following JSON format:
+{
+  \"summary\": \"A brief 1-2 sentence summary of what to do\",
+  \"steps\": [\"Step 1...\", \"Step 2...\", \"Step 3...\"],
+  \"amount\": \"Specific amounts if applicable (e.g., water amount, fertilizer dilution)\",
+  \"timing\": \"Best time of day or conditions for this task\",
+  \"warnings\": [\"Any cautions or things to watch for\"],
+  \"tips\": [\"Optional helpful tips specific to this plant\"]
+}
+
+Be specific to THIS plant's species, current health, and conditions. Do not give generic advice.";
+
+        try {
+            $response = $aiService->chat([
+                ['role' => 'user', 'content' => $prompt]
+            ], $plantName);
+
+            // Parse JSON from response
+            $content = $response['content'] ?? '';
+
+            // Extract JSON from response (it might be wrapped in markdown code blocks)
+            if (preg_match('/```(?:json)?\s*([\s\S]*?)```/', $content, $matches)) {
+                $content = $matches[1];
+            }
+
+            $recommendations = json_decode(trim($content), true);
+
+            if ($recommendations && isset($recommendations['summary'])) {
+                $recommendations['source'] = 'ai';
+                return $recommendations;
+            }
+        } catch (\Exception $e) {
+            error_log("AI recommendation call failed: " . $e->getMessage());
+        }
+
+        // Return fallback if AI fails
+        return $this->generateFallbackRecommendations($task, null);
+    }
+
+    /**
+     * Generate fallback recommendations when AI is unavailable
+     */
+    private function generateFallbackRecommendations(array $task, ?array $weather): array
+    {
+        $taskType = $task['task_type'];
+        $species = strtolower($task['species'] ?? '');
+        $potSize = $task['pot_size'] ?? 'medium';
+        $healthStatus = $task['health_status'] ?? 'healthy';
+
+        $recommendations = [
+            'source' => 'fallback',
+            'summary' => '',
+            'steps' => [],
+            'amount' => '',
+            'timing' => 'Morning is generally best',
+            'warnings' => [],
+            'tips' => []
+        ];
+
+        // Adjust for health status
+        if ($healthStatus === 'struggling' || $healthStatus === 'critical') {
+            $recommendations['warnings'][] = "This plant is currently $healthStatus - proceed carefully and monitor closely after care.";
+        }
+
+        // Seasonal adjustments
+        if ($weather) {
+            $recommendations['tips'][] = "Seasonal note ({$weather['season']}): {$weather['watering_adjustment']}";
+        }
+
+        switch ($taskType) {
+            case 'water':
+                $amounts = ['small' => '100-200ml', 'medium' => '300-500ml', 'large' => '500-750ml', 'xlarge' => '1-1.5L'];
+                $recommendations['summary'] = "Water {$task['plant_name']} thoroughly until water drains from the bottom.";
+                $recommendations['amount'] = $amounts[$potSize] ?? $amounts['medium'];
+                $recommendations['steps'] = [
+                    "Check soil moisture 1-2 inches deep with your finger or moisture meter",
+                    "If dry, water slowly around the base of the plant",
+                    "Continue until water drains from drainage holes",
+                    "Empty saucer after 30 minutes to prevent root rot"
+                ];
+                if (str_contains($species, 'succulent') || str_contains($species, 'cactus')) {
+                    $recommendations['warnings'][] = "Succulents prefer to dry out completely between waterings";
+                    $recommendations['amount'] = "Soak thoroughly, then wait until bone dry";
+                }
+                break;
+
+            case 'fertilize':
+                $strengths = ['small' => '1/4', 'medium' => '1/2', 'large' => '1/2-full', 'xlarge' => 'full'];
+                $recommendations['summary'] = "Apply balanced fertilizer at {$strengths[$potSize]} strength to support growth.";
+                $recommendations['amount'] = "{$strengths[$potSize]} strength dilution";
+                $recommendations['steps'] = [
+                    "Ensure soil is moist before fertilizing (water lightly first if dry)",
+                    "Mix fertilizer at recommended dilution",
+                    "Apply evenly around the soil surface",
+                    "Water again lightly to help distribute nutrients"
+                ];
+                if ($weather && $weather['season'] === 'winter') {
+                    $recommendations['warnings'][] = "Most plants don't need fertilizer in winter - consider skipping";
+                }
+                break;
+
+            case 'trim':
+                $recommendations['summary'] = "Remove dead or yellowing leaves and shape {$task['plant_name']} as needed.";
+                $recommendations['steps'] = [
+                    "Use clean, sharp scissors or pruning shears",
+                    "Remove any yellow, brown, or dead leaves at their base",
+                    "Trim leggy growth to encourage bushier shape",
+                    "Cut just above a leaf node for best regrowth"
+                ];
+                $recommendations['tips'][] = "Healthy cuttings can often be propagated in water!";
+                break;
+
+            case 'repot':
+                $newSizes = ['small' => 'medium', 'medium' => 'large', 'large' => 'xlarge'];
+                $recommendations['summary'] = "Move {$task['plant_name']} to a slightly larger pot with fresh soil.";
+                $recommendations['amount'] = "New pot should be 1-2 inches larger in diameter";
+                $recommendations['steps'] = [
+                    "Water the plant 1-2 days before repotting",
+                    "Prepare new pot with drainage and fresh potting mix",
+                    "Gently remove plant and loosen root ball",
+                    "Place in new pot at same depth, fill with soil",
+                    "Water thoroughly and keep in indirect light for a week"
+                ];
+                break;
+
+            case 'mist':
+                $recommendations['summary'] = "Mist {$task['plant_name']} to increase humidity around the leaves.";
+                $recommendations['steps'] = [
+                    "Use room temperature water in a spray bottle",
+                    "Mist around and above the plant, not directly on leaves",
+                    "Focus on the air around the plant"
+                ];
+                $recommendations['timing'] = "Morning is best - leaves need time to dry before evening";
+                if (str_contains($species, 'succulent') || str_contains($species, 'cactus')) {
+                    $recommendations['warnings'][] = "Skip misting! Succulents and cacti prefer dry conditions.";
+                }
+                break;
+
+            case 'rotate':
+                $recommendations['summary'] = "Turn {$task['plant_name']} 1/4 turn for even light exposure.";
+                $recommendations['steps'] = [
+                    "Rotate the pot 90 degrees (1/4 turn)",
+                    "Always rotate in the same direction",
+                    "Mark the pot if needed to track rotation"
+                ];
+                $recommendations['tips'][] = "This prevents lopsided growth toward the light source";
+                break;
+
+            case 'check':
+                $recommendations['summary'] = "Inspect {$task['plant_name']} for overall health and any issues.";
+                $recommendations['steps'] = [
+                    "Check leaves (top and bottom) for pests or spots",
+                    "Feel soil moisture level",
+                    "Look for new growth or changes",
+                    "Check for yellowing, browning, or drooping"
+                ];
+                $recommendations['tips'][] = "Take a photo to track changes over time";
+                break;
+
+            default:
+                $recommendations['summary'] = "Complete the {$taskType} task for {$task['plant_name']}.";
+                $recommendations['steps'] = ["Follow standard care practices for this task type"];
+        }
+
+        return $recommendations;
+    }
+
+    /**
      * Generate next occurrence of recurring task
      */
     private function generateNextOccurrence(array $task): void

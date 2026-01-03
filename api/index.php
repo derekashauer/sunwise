@@ -102,6 +102,7 @@ $routes = [
     'GET /tasks/plant/{id}' => ['TaskController', 'forPlant', true],
     'POST /tasks/{id}/complete' => ['TaskController', 'complete', true],
     'POST /tasks/{id}/skip' => ['TaskController', 'skip', true],
+    'GET /tasks/{id}/recommendations' => ['TaskController', 'recommendations', true],
 
     // Location routes
     'GET /locations' => ['LocationController', 'index', true],
