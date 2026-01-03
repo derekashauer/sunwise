@@ -3,20 +3,25 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { usePlantsStore } from '@/stores/plants'
 import { useTasksStore } from '@/stores/tasks'
+import { useApi } from '@/composables/useApi'
 import TaskItem from '@/components/tasks/TaskItem.vue'
+import PlantChatModal from '@/components/chat/PlantChatModal.vue'
 
 const router = useRouter()
 const route = useRoute()
 const plants = usePlantsStore()
 const tasksStore = useTasksStore()
+const api = useApi()
 
 const plant = ref(null)
 const photos = ref([])
 const tasks = ref([])
+const carePlan = ref(null)
 const loading = ref(true)
 const showPhotoUpload = ref(false)
 const uploadingPhoto = ref(false)
 const showDeleteConfirm = ref(false)
+const showChat = ref(false)
 
 const healthColors = {
   thriving: 'bg-green-100 text-green-700',
@@ -28,14 +33,15 @@ const healthColors = {
 
 onMounted(async () => {
   try {
-    const [plantData, photosData, tasksData] = await Promise.all([
+    const [plantData, photosData, carePlanData] = await Promise.all([
       plants.getPlant(route.params.id),
       plants.getPhotos(route.params.id),
-      tasksStore.getPlantTasks(route.params.id)
+      api.get(`/plants/${route.params.id}/care-plan`)
     ])
     plant.value = plantData
     photos.value = photosData
-    tasks.value = tasksData
+    carePlan.value = carePlanData.care_plan
+    tasks.value = carePlanData.tasks || []
   } catch (e) {
     window.$toast?.error('Failed to load plant')
     router.back()
@@ -43,6 +49,32 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+function formatTaskDate(dateStr) {
+  const date = new Date(dateStr + 'T00:00:00')
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const diffDays = Math.round((date - today) / (1000 * 60 * 60 * 24))
+
+  const options = { month: 'short', day: 'numeric' }
+  const formatted = date.toLocaleDateString('en-US', options)
+
+  if (diffDays === 0) return `${formatted} (today)`
+  if (diffDays === 1) return `${formatted} (tomorrow)`
+  if (diffDays < 0) return `${formatted} (${Math.abs(diffDays)} days ago)`
+  return `${formatted} (${diffDays} days)`
+}
+
+function getTaskIcon(taskType) {
+  const icons = {
+    water: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />',
+    fertilize: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />',
+    check: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />',
+    trim: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.121 14.121L19 19m-7-7l7-7m-7 7l-2.879 2.879M12 12L9.121 9.121m0 5.758a3 3 0 10-4.243 4.243 3 3 0 004.243-4.243zm0-5.758a3 3 0 10-4.243-4.243 3 3 0 004.243 4.243z" />',
+    repot: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />'
+  }
+  return icons[taskType] || icons.check
+}
 
 async function handlePhotoUpload(event) {
   const file = event.target.files[0]
@@ -73,7 +105,21 @@ async function deletePlant() {
   }
 }
 
-const upcomingTasks = computed(() => tasks.value.filter(t => !t.completed_at).slice(0, 5))
+const upcomingTasks = computed(() => tasks.value.filter(t => !t.completed_at))
+
+async function refreshPlant() {
+  try {
+    const [plantData, carePlanData] = await Promise.all([
+      plants.getPlant(route.params.id),
+      api.get(`/plants/${route.params.id}/care-plan`)
+    ])
+    plant.value = plantData
+    carePlan.value = carePlanData.care_plan
+    tasks.value = carePlanData.tasks || []
+  } catch (e) {
+    console.error('Failed to refresh plant:', e)
+  }
+}
 </script>
 
 <template>
@@ -93,8 +139,27 @@ const upcomingTasks = computed(() => tasks.value.filter(t => !t.completed_at).sl
         </button>
         <div class="flex-1 min-w-0">
           <h1 class="text-xl font-bold text-gray-900 truncate">{{ plant.name }}</h1>
-          <p v-if="plant.species" class="text-gray-500 text-sm">{{ plant.species }}</p>
+          <a
+            v-if="plant.species && plant.wikipedia_url"
+            :href="plant.wikipedia_url"
+            target="_blank"
+            rel="noopener"
+            class="text-plant-600 text-sm hover:underline inline-flex items-center gap-1"
+          >
+            {{ plant.species }}
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
+          <p v-else-if="plant.species" class="text-gray-500 text-sm">{{ plant.species }}</p>
         </div>
+        <!-- Chat button -->
+        <button @click="showChat = true" class="btn-ghost p-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+        </button>
+        <!-- Edit button -->
         <button @click="router.push(`/plants/${plant.id}/edit`)" class="btn-ghost p-2">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -164,16 +229,33 @@ const upcomingTasks = computed(() => tasks.value.filter(t => !t.completed_at).sl
         </p>
       </div>
 
-      <!-- Upcoming tasks -->
-      <div v-if="upcomingTasks.length > 0" class="mb-6">
-        <h2 class="font-semibold text-gray-900 mb-3">Upcoming Care</h2>
-        <div class="space-y-3">
-          <TaskItem
+      <!-- Care Plan Schedule -->
+      <div class="mb-6">
+        <h2 class="font-semibold text-gray-900 mb-3">Care Schedule</h2>
+        <div v-if="upcomingTasks.length > 0" class="card divide-y">
+          <div
             v-for="task in upcomingTasks"
             :key="task.id"
-            :task="task"
-            :plant="plant"
-          />
+            class="flex items-center gap-3 p-3"
+          >
+            <div class="w-8 h-8 rounded-full bg-plant-100 flex items-center justify-center flex-shrink-0">
+              <svg class="w-4 h-4 text-plant-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" v-html="getTaskIcon(task.task_type)"></svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="font-medium text-gray-900 capitalize">{{ task.task_type }}</p>
+              <p class="text-sm text-gray-500">{{ formatTaskDate(task.due_date) }}</p>
+            </div>
+            <span
+              v-if="task.priority === 'high' || task.priority === 'urgent'"
+              class="px-2 py-0.5 text-xs font-medium rounded-full"
+              :class="task.priority === 'urgent' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'"
+            >
+              {{ task.priority }}
+            </span>
+          </div>
+        </div>
+        <div v-else class="card p-4 text-center text-gray-500">
+          <p>No upcoming tasks scheduled</p>
         </div>
       </div>
 
@@ -251,5 +333,14 @@ const upcomingTasks = computed(() => tasks.value.filter(t => !t.completed_at).sl
         </div>
       </div>
     </div>
+
+    <!-- Chat modal -->
+    <PlantChatModal
+      v-if="plant"
+      :plant="plant"
+      :visible="showChat"
+      @close="showChat = false"
+      @plant-updated="refreshPlant"
+    />
   </div>
 </template>

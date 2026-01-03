@@ -1,24 +1,24 @@
 <?php
 /**
- * Claude AI Service
- * Implements AIServiceInterface for Claude Opus 4.5
+ * OpenAI API Service
+ * Implements AIServiceInterface for GPT models
  */
 
-class ClaudeService implements AIServiceInterface
+class OpenAIService implements AIServiceInterface
 {
     private string $apiKey;
     private string $model;
-    private string $apiUrl = 'https://api.anthropic.com/v1/messages';
+    private string $apiUrl = 'https://api.openai.com/v1/chat/completions';
 
-    public function __construct(?string $apiKey = null)
+    public function __construct(string $apiKey)
     {
-        $this->apiKey = $apiKey ?? CLAUDE_API_KEY;
-        $this->model = defined('CLAUDE_MODEL') ? CLAUDE_MODEL : 'claude-opus-4-5-20251101';
+        $this->apiKey = $apiKey;
+        $this->model = defined('OPENAI_MODEL') ? OPENAI_MODEL : 'gpt-5.2';
     }
 
     public function getProviderName(): string
     {
-        return 'claude';
+        return 'openai';
     }
 
     public function validateApiKey(): bool
@@ -26,7 +26,7 @@ class ClaudeService implements AIServiceInterface
         try {
             // Make a minimal API call to validate the key
             $response = $this->sendRequest([
-                ['type' => 'text', 'text' => 'Say "ok"']
+                ['role' => 'user', 'content' => 'Say "ok"']
             ], 10);
             return !empty($response);
         } catch (Exception $e) {
@@ -34,9 +34,6 @@ class ClaudeService implements AIServiceInterface
         }
     }
 
-    /**
-     * Identify plant from image
-     */
     public function identifyPlant(string $imagePath): ?array
     {
         if (!file_exists($imagePath)) {
@@ -64,27 +61,28 @@ Respond ONLY with valid JSON in this exact format:
 }
 PROMPT;
 
-        $response = $this->sendRequest([
+        $messages = [
             [
-                'type' => 'image',
-                'source' => [
-                    'type' => 'base64',
-                    'media_type' => $mimeType,
-                    'data' => $imageData
+                'role' => 'user',
+                'content' => [
+                    [
+                        'type' => 'image_url',
+                        'image_url' => [
+                            'url' => "data:{$mimeType};base64,{$imageData}"
+                        ]
+                    ],
+                    [
+                        'type' => 'text',
+                        'text' => $prompt
+                    ]
                 ]
-            ],
-            [
-                'type' => 'text',
-                'text' => $prompt
             ]
-        ]);
+        ];
 
+        $response = $this->sendRequest($messages);
         return $this->parseJsonResponse($response);
     }
 
-    /**
-     * Analyze plant health
-     */
     public function analyzeHealth(string $imagePath, array $plant): ?array
     {
         if (!file_exists($imagePath)) {
@@ -123,27 +121,28 @@ Respond ONLY with valid JSON:
 }
 PROMPT;
 
-        $response = $this->sendRequest([
+        $messages = [
             [
-                'type' => 'image',
-                'source' => [
-                    'type' => 'base64',
-                    'media_type' => $mimeType,
-                    'data' => $imageData
+                'role' => 'user',
+                'content' => [
+                    [
+                        'type' => 'image_url',
+                        'image_url' => [
+                            'url' => "data:{$mimeType};base64,{$imageData}"
+                        ]
+                    ],
+                    [
+                        'type' => 'text',
+                        'text' => $prompt
+                    ]
                 ]
-            ],
-            [
-                'type' => 'text',
-                'text' => $prompt
             ]
-        ]);
+        ];
 
+        $response = $this->sendRequest($messages);
         return $this->parseJsonResponse($response);
     }
 
-    /**
-     * Generate care plan
-     */
     public function generateCarePlan(array $plant, array $careLog, string $season): ?array
     {
         $plantInfo = "Species: " . ($plant['species'] ?? 'Unknown houseplant');
@@ -201,34 +200,32 @@ Respond ONLY with valid JSON:
 Include 3-5 different task types. Set reasonable intervals based on plant type and season.
 PROMPT;
 
-        $response = $this->sendRequest([
-            [
-                'type' => 'text',
-                'text' => $prompt
-            ]
-        ]);
+        $messages = [
+            ['role' => 'user', 'content' => $prompt]
+        ];
 
+        $response = $this->sendRequest($messages);
         return $this->parseJsonResponse($response);
     }
 
-    /**
-     * Chat with AI about a specific plant
-     */
     public function chat(array $plant, array $messages, array $context = []): array
     {
         // Build system prompt with plant context
         $systemPrompt = $this->buildChatSystemPrompt($plant, $context);
 
-        // Convert messages to Claude format
-        $claudeMessages = [];
+        // Convert messages to OpenAI format
+        $apiMessages = [
+            ['role' => 'system', 'content' => $systemPrompt]
+        ];
+
         foreach ($messages as $msg) {
-            $claudeMessages[] = [
+            $apiMessages[] = [
                 'role' => $msg['role'],
                 'content' => $msg['content']
             ];
         }
 
-        // Add instruction for suggested actions to last message
+        // Add instruction for suggested actions
         $actionInstruction = <<<INST
 
 If you have recommendations that could update the plant's information or care schedule, include them as suggested_actions in your response.
@@ -250,32 +247,13 @@ Always respond with valid JSON in this format:
 Only include suggested_actions if you have specific changes to recommend. The array can be empty if no changes are needed.
 INST;
 
-        // Modify the last message to include the instruction
-        if (!empty($claudeMessages)) {
-            $lastIndex = count($claudeMessages) - 1;
-            if ($claudeMessages[$lastIndex]['role'] === 'user') {
-                $claudeMessages[$lastIndex]['content'] .= $actionInstruction;
-            }
+        // Add the instruction to the last user message
+        $lastIndex = count($apiMessages) - 1;
+        if ($apiMessages[$lastIndex]['role'] === 'user') {
+            $apiMessages[$lastIndex]['content'] .= $actionInstruction;
         }
 
-        // Prepare content with system prompt prepended to first user message
-        $content = [];
-        $systemAdded = false;
-
-        foreach ($claudeMessages as $msg) {
-            if ($msg['role'] === 'user' && !$systemAdded) {
-                $content[] = [
-                    'role' => 'user',
-                    'content' => $systemPrompt . "\n\n" . $msg['content']
-                ];
-                $systemAdded = true;
-            } else {
-                $content[] = $msg;
-            }
-        }
-
-        // Send to Claude API
-        $response = $this->sendChatRequest($content, 2048);
+        $response = $this->sendRequest($apiMessages, 2048);
         $parsed = $this->parseJsonResponse($response);
 
         if ($parsed && isset($parsed['content'])) {
@@ -337,13 +315,10 @@ INST;
         return $prompt;
     }
 
-    /**
-     * Send chat request to Claude API
-     */
-    private function sendChatRequest(array $messages, int $maxTokens = 1024): ?string
+    private function sendRequest(array $messages, int $maxTokens = 1024): ?string
     {
         if (!$this->apiKey) {
-            throw new Exception('Claude API key not configured');
+            throw new Exception('OpenAI API key not configured');
         }
 
         $data = [
@@ -358,8 +333,7 @@ INST;
             CURLOPT_POST => true,
             CURLOPT_HTTPHEADER => [
                 'Content-Type: application/json',
-                'x-api-key: ' . $this->apiKey,
-                'anthropic-version: 2023-06-01'
+                'Authorization: Bearer ' . $this->apiKey
             ],
             CURLOPT_POSTFIELDS => json_encode($data),
             CURLOPT_TIMEOUT => 60
@@ -380,70 +354,16 @@ INST;
         }
 
         $result = json_decode($response, true);
-        return $result['content'][0]['text'] ?? null;
+        return $result['choices'][0]['message']['content'] ?? null;
     }
 
-    /**
-     * Send request to Claude API (single-turn)
-     */
-    private function sendRequest(array $content, int $maxTokens = 1024): ?string
-    {
-        if (!$this->apiKey) {
-            throw new Exception('Claude API key not configured');
-        }
-
-        $data = [
-            'model' => $this->model,
-            'max_tokens' => $maxTokens,
-            'messages' => [
-                [
-                    'role' => 'user',
-                    'content' => $content
-                ]
-            ]
-        ];
-
-        $ch = curl_init($this->apiUrl);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => [
-                'Content-Type: application/json',
-                'x-api-key: ' . $this->apiKey,
-                'anthropic-version: 2023-06-01'
-            ],
-            CURLOPT_POSTFIELDS => json_encode($data),
-            CURLOPT_TIMEOUT => 60
-        ]);
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        curl_close($ch);
-
-        if ($error) {
-            throw new Exception('API request failed: ' . $error);
-        }
-
-        if ($httpCode !== 200) {
-            $errorData = json_decode($response, true);
-            throw new Exception('API error: ' . ($errorData['error']['message'] ?? 'Unknown error'));
-        }
-
-        $result = json_decode($response, true);
-        return $result['content'][0]['text'] ?? null;
-    }
-
-    /**
-     * Parse JSON from Claude response
-     */
     private function parseJsonResponse(?string $response): ?array
     {
         if (!$response) {
             return null;
         }
 
-        // Try to extract JSON from response (Claude might include extra text)
+        // Try to extract JSON from response (AI might include extra text)
         if (preg_match('/\{[\s\S]*\}/s', $response, $matches)) {
             $json = json_decode($matches[0], true);
             if (json_last_error() === JSON_ERROR_NONE) {
@@ -457,7 +377,7 @@ INST;
             return $json;
         }
 
-        error_log('Failed to parse Claude response: ' . $response);
+        error_log('Failed to parse OpenAI response: ' . $response);
         return null;
     }
 }

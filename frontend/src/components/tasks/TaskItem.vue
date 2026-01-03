@@ -69,9 +69,9 @@ async function complete() {
         </span>
       </div>
 
-      <p v-if="plant" class="text-sm text-gray-500 truncate">
-        {{ plant.name }}
-        <span v-if="plant.location" class="text-gray-400">· {{ plant.location }}</span>
+      <p v-if="plant || task.plant_name" class="text-sm text-gray-500 truncate">
+        {{ plant?.name || task.plant_name }}
+        <span v-if="plant?.location_name || task.plant_location" class="text-gray-400">· {{ plant?.location_name || task.plant_location }}</span>
       </p>
 
       <p v-if="task.instructions" class="text-sm text-gray-600 mt-2">
@@ -80,8 +80,8 @@ async function complete() {
     </div>
 
     <!-- Plant thumbnail -->
-    <div v-if="plant?.thumbnail" class="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0">
-      <img :src="`/uploads/plants/${plant.thumbnail}`" :alt="plant.name" class="w-full h-full object-cover">
+    <div v-if="plant?.thumbnail || task.plant_thumbnail" class="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0">
+      <img :src="`/uploads/plants/${plant?.thumbnail || task.plant_thumbnail}`" :alt="plant?.name || task.plant_name" class="w-full h-full object-cover">
     </div>
   </div>
 </template>

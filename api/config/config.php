@@ -3,8 +3,11 @@
  * Application Configuration
  */
 
-// Load .env file if exists
-$envFile = __DIR__ . '/../../.env';
+// Load .env file if exists (check outside public_html first, then inside)
+$envFile = __DIR__ . '/../../../.env';
+if (!file_exists($envFile)) {
+    $envFile = __DIR__ . '/../../.env'; // Fallback for local dev
+}
 if (file_exists($envFile)) {
     $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     foreach ($lines as $line) {
@@ -30,9 +33,13 @@ define('DB_PATH', __DIR__ . '/../../data/sunwise.db');
 define('JWT_SECRET', getenv('JWT_SECRET') ?: 'change-this-secret-in-production');
 define('JWT_EXPIRY', 86400 * 7); // 7 days
 
-// Claude API
+// AI APIs
 define('CLAUDE_API_KEY', getenv('CLAUDE_API_KEY') ?: '');
-define('CLAUDE_MODEL', 'claude-sonnet-4-20250514');
+define('CLAUDE_MODEL', 'claude-opus-4-5-20251101');  // Claude Opus 4.5
+define('OPENAI_MODEL', 'gpt-5.2');  // ChatGPT 5.2
+
+// Encryption key for storing user API keys (32 bytes = 64 hex chars)
+define('ENCRYPTION_KEY', getenv('ENCRYPTION_KEY') ?: '');
 
 // VAPID for push notifications
 define('VAPID_PUBLIC_KEY', getenv('VAPID_PUBLIC_KEY') ?: '');

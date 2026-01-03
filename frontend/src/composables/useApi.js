@@ -6,7 +6,10 @@ export function useApi() {
   function getHeaders() {
     const auth = useAuthStore()
     const headers = {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
     }
     if (auth.token) {
       headers['Authorization'] = `Bearer ${auth.token}`
@@ -14,11 +17,19 @@ export function useApi() {
     return headers
   }
 
+  // Add cache-busting timestamp to URL
+  function addCacheBuster(url) {
+    const separator = url.includes('?') ? '&' : '?'
+    return `${url}${separator}_t=${Date.now()}`
+  }
+
   async function request(method, endpoint, data = null) {
-    const url = `${API_BASE}${endpoint}`
+    // Always add cache-buster to prevent any caching
+    const url = addCacheBuster(`${API_BASE}${endpoint}`)
     const options = {
       method,
-      headers: getHeaders()
+      headers: getHeaders(),
+      cache: 'no-store'  // Force browser to never cache
     }
 
     if (data && method !== 'GET') {
@@ -37,9 +48,14 @@ export function useApi() {
 
   async function upload(endpoint, formData) {
     const auth = useAuthStore()
-    const url = `${API_BASE}${endpoint}`
+    // Always add cache-buster
+    const url = addCacheBuster(`${API_BASE}${endpoint}`)
 
-    const headers = {}
+    const headers = {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    }
     if (auth.token) {
       headers['Authorization'] = `Bearer ${auth.token}`
     }
@@ -47,7 +63,8 @@ export function useApi() {
     const response = await fetch(url, {
       method: 'POST',
       headers,
-      body: formData
+      body: formData,
+      cache: 'no-store'
     })
 
     const json = await response.json()

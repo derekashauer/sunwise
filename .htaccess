@@ -42,6 +42,21 @@ RewriteRule ^(.*)$ index.html [L]
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
 </IfModule>
 
+# NEVER cache API responses - aggressive anti-caching
+<IfModule mod_headers.c>
+    <If "%{REQUEST_URI} =~ m#^/api/#">
+        Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0"
+        Header always set Pragma "no-cache"
+        Header always set Expires "Thu, 01 Jan 1970 00:00:00 GMT"
+        Header always set Vary "*"
+    </If>
+</IfModule>
+
+# Also prevent caching of JSON responses
+<IfModule mod_expires.c>
+    ExpiresByType application/json "access plus 0 seconds"
+</IfModule>
+
 # GZIP compression
 <IfModule mod_deflate.c>
     AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript application/json image/svg+xml

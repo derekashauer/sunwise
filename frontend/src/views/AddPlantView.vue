@@ -2,15 +2,19 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { usePlantsStore } from '@/stores/plants'
+import { useLocationsStore } from '@/stores/locations'
 
 const router = useRouter()
 const route = useRoute()
 const plants = usePlantsStore()
+const locationsStore = useLocationsStore()
 
 const isEditing = computed(() => !!route.params.id)
 const loading = ref(false)
 const identifying = ref(false)
 const error = ref('')
+const showAddLocation = ref(false)
+const newLocationName = ref('')
 
 const form = ref({
   name: '',
@@ -18,7 +22,7 @@ const form = ref({
   pot_size: 'medium',
   soil_type: 'standard',
   light_condition: 'medium',
-  location: '',
+  location_id: null,
   notes: ''
 })
 
@@ -48,6 +52,8 @@ const lightConditions = [
 ]
 
 onMounted(async () => {
+  await locationsStore.fetchLocations()
+
   if (isEditing.value) {
     try {
       const plant = await plants.getPlant(route.params.id)
@@ -57,7 +63,7 @@ onMounted(async () => {
         pot_size: plant.pot_size || 'medium',
         soil_type: plant.soil_type || 'standard',
         light_condition: plant.light_condition || 'medium',
-        location: plant.location || '',
+        location_id: plant.location_id || null,
         notes: plant.notes || ''
       }
       if (plant.thumbnail) {
@@ -68,6 +74,19 @@ onMounted(async () => {
     }
   }
 })
+
+async function addLocation() {
+  if (!newLocationName.value.trim()) return
+
+  try {
+    const location = await locationsStore.createLocation(newLocationName.value.trim())
+    form.value.location_id = location.id
+    newLocationName.value = ''
+    showAddLocation.value = false
+  } catch (e) {
+    error.value = e.message
+  }
+}
 
 function handleImageSelect(event) {
   const file = event.target.files[0]
@@ -209,14 +228,49 @@ async function handleSubmit() {
 
       <!-- Location -->
       <div>
-        <label for="location" class="block text-sm font-medium text-gray-700 mb-1">Location</label>
-        <input
-          id="location"
-          v-model="form.location"
-          type="text"
-          class="input"
-          placeholder="e.g., Living room window"
-        >
+        <label class="block text-sm font-medium text-gray-700 mb-2">Location</label>
+        <div v-if="!showAddLocation">
+          <div class="flex flex-wrap gap-2 mb-2">
+            <button
+              v-for="location in locationsStore.locations"
+              :key="location.id"
+              type="button"
+              @click="form.location_id = location.id"
+              class="px-3 py-2 rounded-xl border-2 text-sm transition-all"
+              :class="form.location_id === location.id
+                ? 'border-plant-500 bg-plant-50 text-plant-700'
+                : 'border-gray-200 hover:border-gray-300 text-gray-700'"
+            >
+              {{ location.name }}
+            </button>
+            <button
+              type="button"
+              @click="showAddLocation = true"
+              class="px-3 py-2 rounded-xl border-2 border-dashed border-gray-300 text-sm text-gray-500 hover:border-gray-400 hover:text-gray-600"
+            >
+              + Add Location
+            </button>
+          </div>
+          <button
+            v-if="form.location_id"
+            type="button"
+            @click="form.location_id = null"
+            class="text-sm text-gray-500 hover:text-gray-700"
+          >
+            Clear selection
+          </button>
+        </div>
+        <div v-else class="flex gap-2">
+          <input
+            v-model="newLocationName"
+            type="text"
+            class="input flex-1"
+            placeholder="e.g., Living Room"
+            @keyup.enter="addLocation"
+          >
+          <button type="button" @click="addLocation" class="btn-primary px-4">Add</button>
+          <button type="button" @click="showAddLocation = false" class="btn-secondary px-4">Cancel</button>
+        </div>
       </div>
 
       <!-- Pot size -->

@@ -38,31 +38,21 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Disable precaching completely - no files cached by service worker
+        globPatterns: [],
+        // Force network for everything - no caching at all
         runtimeCaching: [
           {
-            urlPattern: /^https?:\/\/.*\/api\//,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 86400
-              }
-            }
-          },
-          {
-            urlPattern: /\/uploads\/plants\//,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'plant-images',
-              expiration: {
-                maxEntries: 200,
-                maxAgeSeconds: 604800
-              }
-            }
+            // ALL requests go to network, never cached
+            urlPattern: /.*/,
+            handler: 'NetworkOnly'
           }
-        ]
+        ],
+        // Don't cache anything
+        navigateFallback: null,
+        cleanupOutdatedCaches: true,
+        skipWaiting: true,
+        clientsClaim: true
       }
     })
   ],

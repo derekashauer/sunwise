@@ -45,12 +45,14 @@ See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for deployment instructions.
 
 ## Features
 
-- **Plant Management** - Add plants with photos, AI auto-identifies species
-- **AI Care Plans** - Personalized care schedules based on your plant's needs
-- **What to Do Today** - Daily task dashboard
+- **Plant Management** - Add plants with photos, AI auto-identifies species with Wikipedia links
+- **AI Care Plans** - Personalized care schedules showing dates with relative time (e.g., "Jan 4 - water (2 days)")
+- **What to Do Today** - Daily task dashboard with plant photos and names
+- **Location Management** - Organize plants by room/location, filter by location
 - **Sitter Mode** - Shareable care instructions for plant sitters
 - **Push Notifications** - Reminders for watering and care tasks
 - **Offline Support** - PWA works without internet
+- **iPhone Photo Support** - Automatic EXIF orientation correction for camera uploads
 
 ## Tech Stack
 

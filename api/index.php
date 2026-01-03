@@ -15,6 +15,12 @@ header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 header('Content-Type: application/json');
 
+// Prevent caching of API responses
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Cache-Control: post-check=0, pre-check=0', false);
+header('Pragma: no-cache');
+header('Expires: Thu, 01 Jan 1970 00:00:00 GMT');
+
 // Handle preflight
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -73,12 +79,25 @@ $routes = [
     'POST /plants/{id}/care-plan/regenerate' => ['CarePlanController', 'regenerate', true],
     'GET /plants/{id}/care-log' => ['CarePlanController', 'careLog', true],
 
+    // Plant chat routes
+    'POST /plants/{id}/chat' => ['ChatController', 'chat', true],
+    'GET /plants/{id}/chat' => ['ChatController', 'history', true],
+    'POST /plants/{id}/chat/apply-action' => ['ChatController', 'applyAction', true],
+    'DELETE /plants/{id}/chat' => ['ChatController', 'clearHistory', true],
+
     // Task routes
     'GET /tasks/today' => ['TaskController', 'today', true],
     'GET /tasks/upcoming' => ['TaskController', 'upcoming', true],
     'GET /tasks/plant/{id}' => ['TaskController', 'forPlant', true],
     'POST /tasks/{id}/complete' => ['TaskController', 'complete', true],
     'POST /tasks/{id}/skip' => ['TaskController', 'skip', true],
+
+    // Location routes
+    'GET /locations' => ['LocationController', 'index', true],
+    'POST /locations' => ['LocationController', 'store', true],
+    'PUT /locations/{id}' => ['LocationController', 'update', true],
+    'DELETE /locations/{id}' => ['LocationController', 'destroy', true],
+    'GET /locations/{id}/plants' => ['LocationController', 'plants', true],
 
     // Sitter routes
     'POST /sitter/create' => ['SitterController', 'create', true],
@@ -92,6 +111,14 @@ $routes = [
     // Notification routes
     'POST /notifications/subscribe' => ['NotificationController', 'subscribe', true],
     'DELETE /notifications/unsubscribe' => ['NotificationController', 'unsubscribe', true],
+
+    // Settings routes
+    'GET /settings/ai' => ['SettingsController', 'getAiSettings', true],
+    'POST /settings/ai/claude-key' => ['SettingsController', 'setClaudeKey', true],
+    'POST /settings/ai/openai-key' => ['SettingsController', 'setOpenAIKey', true],
+    'DELETE /settings/ai/claude-key' => ['SettingsController', 'removeClaudeKey', true],
+    'DELETE /settings/ai/openai-key' => ['SettingsController', 'removeOpenAIKey', true],
+    'PUT /settings/ai/default-provider' => ['SettingsController', 'setDefaultProvider', true],
 ];
 
 // Match route

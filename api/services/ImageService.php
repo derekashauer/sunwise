@@ -115,6 +115,9 @@ class ImageService
             return copy($source, $destination);
         }
 
+        // Fix EXIF orientation (iPhone photos)
+        $image = $this->fixOrientation($image, $source, $mimeType);
+
         $width = imagesx($image);
         $height = imagesy($image);
 
@@ -191,5 +194,38 @@ class ImageService
         ];
 
         return $extensions[$mimeType] ?? 'jpg';
+    }
+
+    /**
+     * Fix image orientation based on EXIF data (iPhone photos)
+     */
+    private function fixOrientation($image, string $filepath, string $mimeType)
+    {
+        if ($mimeType !== 'image/jpeg') {
+            return $image;
+        }
+
+        if (!function_exists('exif_read_data')) {
+            return $image;
+        }
+
+        $exif = @exif_read_data($filepath);
+        if (!$exif || !isset($exif['Orientation'])) {
+            return $image;
+        }
+
+        switch ($exif['Orientation']) {
+            case 3:
+                $image = imagerotate($image, 180, 0);
+                break;
+            case 6:
+                $image = imagerotate($image, -90, 0);
+                break;
+            case 8:
+                $image = imagerotate($image, 90, 0);
+                break;
+        }
+
+        return $image;
     }
 }

@@ -12,8 +12,10 @@ class PlantController
     {
         $stmt = db()->prepare('
             SELECT p.*,
+                   l.name as location_name,
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as thumbnail
             FROM plants p
+            LEFT JOIN locations l ON p.location_id = l.id
             WHERE p.user_id = ?
             ORDER BY p.created_at DESC
         ');
@@ -47,7 +49,7 @@ class PlantController
 
         // Insert plant
         $stmt = db()->prepare('
-            INSERT INTO plants (user_id, name, species, pot_size, soil_type, light_condition, location, notes)
+            INSERT INTO plants (user_id, name, species, pot_size, soil_type, light_condition, location_id, notes)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ');
         $stmt->execute([
@@ -57,7 +59,7 @@ class PlantController
             $body['pot_size'] ?? 'medium',
             $body['soil_type'] ?? 'standard',
             $body['light_condition'] ?? 'medium',
-            $body['location'] ?? null,
+            $body['location_id'] ?? null,
             $body['notes'] ?? null
         ]);
 
@@ -91,8 +93,10 @@ class PlantController
 
         $stmt = db()->prepare('
             SELECT p.*,
+                   l.name as location_name,
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as thumbnail
             FROM plants p
+            LEFT JOIN locations l ON p.location_id = l.id
             WHERE p.id = ? AND p.user_id = ?
         ');
         $stmt->execute([$plantId, $userId]);
@@ -100,6 +104,11 @@ class PlantController
 
         if (!$plant) {
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
+        }
+
+        // Add Wikipedia link for species
+        if ($plant['species']) {
+            $plant['wikipedia_url'] = 'https://en.wikipedia.org/wiki/' . urlencode(str_replace(' ', '_', $plant['species']));
         }
 
         return ['plant' => $plant];
@@ -120,7 +129,7 @@ class PlantController
         }
 
         // Build update query dynamically
-        $allowedFields = ['name', 'species', 'pot_size', 'soil_type', 'light_condition', 'location', 'notes'];
+        $allowedFields = ['name', 'species', 'pot_size', 'soil_type', 'light_condition', 'location_id', 'notes'];
         $updates = [];
         $values = [];
 
