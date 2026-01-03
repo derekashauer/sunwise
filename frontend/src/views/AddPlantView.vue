@@ -23,7 +23,8 @@ const form = ref({
   soil_type: 'standard',
   light_condition: 'medium',
   location_id: null,
-  notes: ''
+  notes: '',
+  health_status: 'healthy'
 })
 
 const imageFile = ref(null)
@@ -51,6 +52,13 @@ const lightConditions = [
   { value: 'direct', label: 'Direct Sunlight' }
 ]
 
+const healthStatuses = [
+  { value: 'thriving', label: 'Thriving', emoji: '🌟', desc: 'Growing vigorously' },
+  { value: 'healthy', label: 'Healthy', emoji: '✅', desc: 'Doing well' },
+  { value: 'struggling', label: 'Struggling', emoji: '⚠️', desc: 'Needs attention' },
+  { value: 'critical', label: 'Critical', emoji: '🚨', desc: 'Urgent care needed' }
+]
+
 onMounted(async () => {
   await locationsStore.fetchLocations()
 
@@ -64,7 +72,8 @@ onMounted(async () => {
         soil_type: plant.soil_type || 'standard',
         light_condition: plant.light_condition || 'medium',
         location_id: plant.location_id || null,
-        notes: plant.notes || ''
+        notes: plant.notes || '',
+        health_status: plant.health_status || 'healthy'
       }
       if (plant.thumbnail) {
         imagePreview.value = `/uploads/plants/${plant.thumbnail}`
@@ -321,6 +330,31 @@ async function handleSubmit() {
             <span class="text-sm font-medium" :class="form.light_condition === light.value ? 'text-plant-700' : 'text-gray-700'">
               {{ light.label }}
             </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Health Status (only show when editing) -->
+      <div v-if="isEditing">
+        <label class="block text-sm font-medium text-gray-700 mb-2">Health Status</label>
+        <div class="grid grid-cols-2 gap-2">
+          <button
+            v-for="status in healthStatuses"
+            :key="status.value"
+            type="button"
+            @click="form.health_status = status.value"
+            class="p-3 rounded-xl border-2 text-left transition-all flex items-center gap-2"
+            :class="form.health_status === status.value
+              ? 'border-plant-500 bg-plant-50'
+              : 'border-gray-200 hover:border-gray-300'"
+          >
+            <span class="text-xl">{{ status.emoji }}</span>
+            <div>
+              <span class="text-sm font-medium block" :class="form.health_status === status.value ? 'text-plant-700' : 'text-gray-700'">
+                {{ status.label }}
+              </span>
+              <span class="text-xs text-gray-500">{{ status.desc }}</span>
+            </div>
           </button>
         </div>
       </div>

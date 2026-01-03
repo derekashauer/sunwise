@@ -213,16 +213,12 @@ class TaskController
                    p.notes as plant_notes,
                    p.user_id,
                    l.name as location_name,
-                   cp.watering_frequency,
-                   cp.fertilizing_frequency,
-                   cp.light_requirements,
-                   cp.humidity_preference,
-                   cp.temperature_range,
-                   cp.special_instructions
+                   cp.season,
+                   cp.ai_reasoning
             FROM tasks t
             JOIN plants p ON t.plant_id = p.id
             LEFT JOIN locations l ON p.location_id = l.id
-            LEFT JOIN care_plans cp ON cp.plant_id = p.id
+            LEFT JOIN care_plans cp ON cp.plant_id = p.id AND cp.is_active = 1
             WHERE t.id = ?
         ');
         $stmt->execute([$taskId]);
@@ -356,13 +352,11 @@ class TaskController
             $context .= "- Owner's Notes: {$task['plant_notes']}\n";
         }
 
-        // Care plan details
-        if ($task['watering_frequency'] || $task['special_instructions']) {
-            $context .= "\n## Care Plan\n";
-            if ($task['watering_frequency']) $context .= "- Watering: every {$task['watering_frequency']} days\n";
-            if ($task['humidity_preference']) $context .= "- Humidity: {$task['humidity_preference']}\n";
-            if ($task['temperature_range']) $context .= "- Temperature: {$task['temperature_range']}\n";
-            if ($task['special_instructions']) $context .= "- Special Instructions: {$task['special_instructions']}\n";
+        // Care plan details from AI reasoning
+        if (!empty($task['ai_reasoning'])) {
+            $context .= "\n## Current Care Plan\n";
+            $context .= "- Season: " . ($task['season'] ?: 'Not specified') . "\n";
+            $context .= "- AI Care Notes: {$task['ai_reasoning']}\n";
         }
 
         // Recent care history

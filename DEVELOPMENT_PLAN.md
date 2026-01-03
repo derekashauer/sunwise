@@ -1,5 +1,12 @@
 # Sunwise - Personal Plant Manager
 
+**Current Version:** 0.2.0
+
+## Versioning
+- **Major (X.0.0):** Full rewrites or breaking changes
+- **Minor (0.X.0):** New features
+- **Patch (0.0.X):** Bug fixes and small improvements
+
 ## Overview
 A mobile-first PWA for managing houseplants with AI-powered care plans, hosted on shared hosting (SiteGround).
 
@@ -427,6 +434,32 @@ db.version(1).stores({
 
 ## Deployment Strategy (Git-based)
 
+### Deployment Workflow
+**Always follow this order:**
+1. Commit changes to GitHub first
+2. Push to GitHub
+3. Deploy to SiteGround via SSH
+
+### Manual Deploy to SiteGround (SSH)
+```bash
+# 1. Build frontend locally
+cd frontend && npm run build
+
+# 2. Create dist zip
+cd dist && zip -r ../sunwise-dist.zip .
+
+# 3. Upload and deploy via SSH
+sshpass -e scp -P 18765 sunwise-dist.zip user@ssh.server.com:~/
+sshpass -e ssh -p 18765 user@ssh.server.com '
+  cd ~/www/domain.com/public_html/assets && rm -f *.js *.css
+  cd ~/www/domain.com/public_html && unzip -o ~/sunwise-dist.zip -d .
+  rm ~/sunwise-dist.zip
+'
+
+# 4. Deploy API changes (if any)
+sshpass -e scp -P 18765 api/controllers/SomeController.php user@ssh.server.com:~/www/domain.com/public_html/api/controllers/
+```
+
 ### Setup (One-time on SiteGround)
 1. SSH into hosting, set up bare git repo
 2. Configure post-receive hook to pull and build
@@ -487,23 +520,35 @@ cd api && php -S localhost:8080
 
 ---
 
-## Enhancement Suggestions
+## Feature Roadmap
 
-### High Value
+### Planned Features (Priority Order)
+| Feature | Description | Status |
+|---------|-------------|--------|
+| Daily task email | Configurable daily digest email with user-selectable send time | Planned |
+| SMS notifications | User-provided 3rd party API key (Twilio, etc.) for SMS alerts | Planned |
+| Plant name generator | Dice roll button for fun, quirky, nonsensical plant names | Planned |
+| Window orientation | Set north/south/east/west facing for each plant location | Planned |
+| Public plant gallery | Shareable URL showing all user's plants (privacy optional) | Planned |
+| AI species picker | After adding plant, AI shows multiple species with confidence % in modal for user to select | Planned |
+
+### Enhancement Suggestions
+
+#### High Value
 1. **Plant Health Timeline** - Visual graph showing health over time with care events overlaid
 2. **Watering Reminder Widgets** - iOS/Android home screen widgets via PWA
 3. **Plant Community ID** - When AI uncertain, option to ask community (future)
 4. **Seasonal Prep Alerts** - "Winter is coming, here's how to prepare your plants"
 5. **Propagation Tracking** - Track cuttings/babies from parent plants
 
-### Medium Value
+#### Medium Value
 6. **Multiple Locations** - Manage plants across home, office, etc.
 7. **Plant Wishlist** - Save plants you want, get care preview
 8. **Care Streaks** - Gamification: "15-day watering streak!"
 9. **Export Care Log** - PDF report for plant history
 10. **Dark Mode** - With plant-friendly green accents
 
-### Nice to Have
+#### Nice to Have
 11. **Plant Value Tracking** - Track investment in plants
 12. **Weather Integration** - Adjust care based on local weather (humidity, temp)
 13. **QR Codes** - Print QR labels for quick plant access
@@ -636,3 +681,30 @@ api/cron/
 ├── weekly.php      # Maintenance + seasonal updates
 └── CronBase.php    # Shared utilities, logging
 ```
+
+---
+
+## Changelog
+
+### v0.2.0 (2026-01-03)
+**Features:**
+- AI-powered task recommendations with personalized care tips per plant
+- Health status picker in plant edit form
+- Health status badge (clickable) on plant detail view
+- Multi-provider AI support (Claude + OpenAI) with user API keys
+- AI chat for plants with conversation history
+
+**Fixes:**
+- Fixed SQL query error in task recommendations (removed non-existent care_plans columns)
+- Fixed API key validation - now format-only check without API calls
+- Fixed PWA caching issues with no-cache headers
+
+### v0.1.0 (2025-12-XX)
+- Initial release
+- Basic plant management (add, edit, delete)
+- Photo uploads with AI identification
+- Care plan generation
+- Task management dashboard
+- Sitter mode for vacation care
+- PWA with offline support
+- Push notifications
