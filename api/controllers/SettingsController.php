@@ -49,7 +49,8 @@ class SettingsController
         }
 
         // Validate the key format (Claude keys start with sk-ant-)
-        if (!preg_match('/^sk-ant-/', $apiKey)) {
+        // Accept any sk-ant- prefix (e.g., sk-ant-api03-, sk-ant-admin-, etc.)
+        if (!preg_match('/^sk-ant-[a-zA-Z0-9-]+/', $apiKey)) {
             return ['status' => 400, 'data' => ['error' => 'Invalid Claude API key format. Keys should start with sk-ant-']];
         }
 
@@ -101,7 +102,8 @@ class SettingsController
         }
 
         // Validate the key format (OpenAI keys start with sk-)
-        if (!preg_match('/^sk-/', $apiKey)) {
+        // Accept sk- or sk-proj- prefixes (project API keys)
+        if (!preg_match('/^sk-[a-zA-Z0-9-]+/', $apiKey)) {
             return ['status' => 400, 'data' => ['error' => 'Invalid OpenAI API key format. Keys should start with sk-']];
         }
 
