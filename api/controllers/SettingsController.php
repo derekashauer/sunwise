@@ -54,15 +54,8 @@ class SettingsController
             return ['status' => 400, 'data' => ['error' => 'Invalid Claude API key format. Keys should start with sk-ant-']];
         }
 
-        // Test the key by making a simple API call
-        try {
-            $service = AIServiceFactory::createWithKey('claude', $apiKey);
-            if (!$service->validateApiKey()) {
-                return ['status' => 400, 'data' => ['error' => 'Invalid API key. Please check your key and try again.']];
-            }
-        } catch (Exception $e) {
-            return ['status' => 400, 'data' => ['error' => 'Failed to validate API key: ' . $e->getMessage()]];
-        }
+        // Skip validation - just check format and save.
+        // Validation will happen when the key is actually used.
 
         // Encrypt the key
         try {
@@ -107,15 +100,8 @@ class SettingsController
             return ['status' => 400, 'data' => ['error' => 'Invalid OpenAI API key format. Keys should start with sk-']];
         }
 
-        // Test the key by making a simple API call
-        try {
-            $service = AIServiceFactory::createWithKey('openai', $apiKey);
-            if (!$service->validateApiKey()) {
-                return ['status' => 400, 'data' => ['error' => 'Invalid API key. Please check your key and try again.']];
-            }
-        } catch (Exception $e) {
-            return ['status' => 400, 'data' => ['error' => 'Failed to validate API key: ' . $e->getMessage()]];
-        }
+        // Skip validation for now - just check format and save
+        // OpenAI key format is valid at this point, save it directly
 
         // Encrypt the key
         try {

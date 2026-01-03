@@ -36,7 +36,7 @@ define('JWT_EXPIRY', 86400 * 7); // 7 days
 // AI APIs
 define('CLAUDE_API_KEY', getenv('CLAUDE_API_KEY') ?: '');
 define('CLAUDE_MODEL', 'claude-opus-4-5-20251101');  // Claude Opus 4.5
-define('OPENAI_MODEL', 'gpt-5.2');  // ChatGPT 5.2
+define('OPENAI_MODEL', 'gpt-5.2');  // GPT-5.2
 
 // Encryption key for storing user API keys (32 bytes = 64 hex chars)
 define('ENCRYPTION_KEY', getenv('ENCRYPTION_KEY') ?: '');
