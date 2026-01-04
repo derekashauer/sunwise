@@ -61,11 +61,28 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('user', JSON.stringify(newUser))
   }
 
-  function logout() {
+  async function logout() {
     token.value = null
     user.value = null
     localStorage.removeItem('token')
     localStorage.removeItem('user')
+
+    // Clear PWA caches and unregister service worker to ensure fresh content on next login
+    try {
+      // Clear all caches
+      if ('caches' in window) {
+        const cacheNames = await caches.keys()
+        await Promise.all(cacheNames.map(name => caches.delete(name)))
+      }
+
+      // Unregister service workers
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(registrations.map(reg => reg.unregister()))
+      }
+    } catch (e) {
+      console.error('Failed to clear caches:', e)
+    }
   }
 
   return {
