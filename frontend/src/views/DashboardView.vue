@@ -26,6 +26,26 @@ const greeting = computed(() => {
 const pendingTasks = computed(() => tasks.todayTasks.filter(t => !t.completed_at))
 const completedTasks = computed(() => tasks.todayTasks.filter(t => t.completed_at))
 
+// Group pending tasks by location
+const tasksByLocation = computed(() => {
+  const groups = {}
+  for (const task of pendingTasks.value) {
+    const plant = getPlant(task.plant_id)
+    const locationName = plant?.location_name || 'No Location'
+    if (!groups[locationName]) {
+      groups[locationName] = []
+    }
+    groups[locationName].push(task)
+  }
+  // Sort location names, putting "No Location" last
+  const sortedLocations = Object.keys(groups).sort((a, b) => {
+    if (a === 'No Location') return 1
+    if (b === 'No Location') return -1
+    return a.localeCompare(b)
+  })
+  return sortedLocations.map(name => ({ name, tasks: groups[name] }))
+})
+
 function getPlant(plantId) {
   return plants.getPlantById(plantId)
 }
@@ -64,18 +84,30 @@ function getPlant(plantId) {
       </button>
     </div>
 
-    <!-- Task list -->
+    <!-- Task list grouped by location -->
     <div v-else class="space-y-6">
-      <!-- Pending tasks -->
-      <section v-if="pendingTasks.length > 0">
+      <!-- Pending tasks by location -->
+      <section v-if="tasksByLocation.length > 0">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">To Do</h2>
-        <div class="space-y-3">
-          <TaskItem
-            v-for="task in pendingTasks"
-            :key="task.id"
-            :task="task"
-            :plant="getPlant(task.plant_id)"
-          />
+        <div class="space-y-4">
+          <div v-for="group in tasksByLocation" :key="group.name" class="space-y-2">
+            <div class="flex items-center gap-2 text-sm text-gray-600">
+              <svg class="w-4 h-4 text-plant-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <span class="font-medium">{{ group.name }}</span>
+              <span class="text-gray-400">({{ group.tasks.length }})</span>
+            </div>
+            <div class="space-y-2 ml-6">
+              <TaskItem
+                v-for="task in group.tasks"
+                :key="task.id"
+                :task="task"
+                :plant="getPlant(task.plant_id)"
+              />
+            </div>
+          </div>
         </div>
       </section>
 

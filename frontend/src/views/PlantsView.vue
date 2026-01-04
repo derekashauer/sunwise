@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePlantsStore } from '@/stores/plants'
 import { useLocationsStore } from '@/stores/locations'
@@ -13,6 +13,7 @@ const showLocationsPanel = ref(false)
 const editingLocation = ref(null)
 const newLocationName = ref('')
 const savingLocation = ref(false)
+const selectedLocation = ref('all') // 'all' or location name
 
 const windowOrientations = [
   { value: null, label: 'Not set', icon: '?' },
@@ -77,11 +78,54 @@ async function deleteLocation(id) {
 function getOrientationLabel(value) {
   return windowOrientations.find(o => o.value === value)?.label || 'Not set'
 }
+
+// Get unique location names for filter dropdown
+const locationOptions = computed(() => {
+  const names = new Set()
+  for (const plant of plants.plants) {
+    names.add(plant.location_name || 'No Location')
+  }
+  return ['all', ...Array.from(names).sort((a, b) => {
+    if (a === 'No Location') return 1
+    if (b === 'No Location') return -1
+    return a.localeCompare(b)
+  })]
+})
+
+// Filter plants by selected location
+const filteredPlants = computed(() => {
+  if (selectedLocation.value === 'all') {
+    return plants.plants
+  }
+  return plants.plants.filter(p => {
+    const loc = p.location_name || 'No Location'
+    return loc === selectedLocation.value
+  })
+})
+
+// Group filtered plants by location
+const plantsByLocation = computed(() => {
+  const groups = {}
+  for (const plant of filteredPlants.value) {
+    const locationName = plant.location_name || 'No Location'
+    if (!groups[locationName]) {
+      groups[locationName] = []
+    }
+    groups[locationName].push(plant)
+  }
+  // Sort location names, putting "No Location" last
+  const sortedLocations = Object.keys(groups).sort((a, b) => {
+    if (a === 'No Location') return 1
+    if (b === 'No Location') return -1
+    return a.localeCompare(b)
+  })
+  return sortedLocations.map(name => ({ name, plants: groups[name] }))
+})
 </script>
 
 <template>
   <div class="page-container">
-    <header class="flex items-center justify-between mb-6">
+    <header class="flex items-center justify-between mb-4">
       <div>
         <h1 class="page-title mb-0">My Plants</h1>
         <p class="text-gray-500">{{ plants.plantsCount }} plant{{ plants.plantsCount !== 1 ? 's' : '' }}</p>
@@ -101,6 +145,23 @@ function getOrientationLabel(value) {
         </button>
       </div>
     </header>
+
+    <!-- Location filter -->
+    <div v-if="plants.plants.length > 0 && locationOptions.length > 2" class="mb-4">
+      <div class="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4">
+        <button
+          v-for="loc in locationOptions"
+          :key="loc"
+          @click="selectedLocation = loc"
+          class="px-3 py-1.5 rounded-full text-sm whitespace-nowrap transition-all"
+          :class="selectedLocation === loc
+            ? 'bg-plant-500 text-white'
+            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+        >
+          {{ loc === 'all' ? 'All Locations' : loc }}
+        </button>
+      </div>
+    </div>
 
     <!-- Locations Panel -->
     <div v-if="showLocationsPanel" class="mb-6 p-4 bg-white rounded-2xl shadow-sm border border-gray-100">
@@ -234,14 +295,28 @@ function getOrientationLabel(value) {
       </button>
     </div>
 
-    <!-- Plants grid -->
-    <div v-else class="grid grid-cols-2 gap-4">
-      <PlantCard
-        v-for="plant in plants.plants"
-        :key="plant.id"
-        :plant="plant"
-        @click="router.push(`/plants/${plant.id}`)"
-      />
+    <!-- Plants grouped by location -->
+    <div v-else class="space-y-6">
+      <div v-for="group in plantsByLocation" :key="group.name">
+        <!-- Location header -->
+        <div class="flex items-center gap-2 mb-3">
+          <svg class="w-4 h-4 text-plant-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          <span class="font-semibold text-gray-700">{{ group.name }}</span>
+          <span class="text-sm text-gray-400">({{ group.plants.length }})</span>
+        </div>
+        <!-- Plants grid for this location -->
+        <div class="grid grid-cols-2 gap-4">
+          <PlantCard
+            v-for="plant in group.plants"
+            :key="plant.id"
+            :plant="plant"
+            @click="router.push(`/plants/${plant.id}`)"
+          />
+        </div>
+      </div>
     </div>
   </div>
 </template>
