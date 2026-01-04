@@ -45,6 +45,12 @@ const routes = [
     meta: { requiresAuth: false, isGuest: true }
   },
   {
+    path: '/shopping-list',
+    name: 'shopping-list',
+    component: () => import('@/views/ShoppingListView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue'),

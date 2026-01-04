@@ -8,6 +8,7 @@ import TaskItem from '@/components/tasks/TaskItem.vue'
 import PlantChatModal from '@/components/chat/PlantChatModal.vue'
 import CareLogModal from '@/components/care/CareLogModal.vue'
 import CareLogEntry from '@/components/care/CareLogEntry.vue'
+import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -34,6 +35,10 @@ const showCareLog = ref(false)
 const showCareLogModal = ref(false)
 const careLogFilter = ref('')
 const showAllCareLog = ref(false)
+const showShoppingModal = ref(false)
+const shoppingItem = ref('')
+const shoppingNotes = ref('')
+const savingShoppingItem = ref(false)
 
 const healthColors = {
   thriving: 'bg-green-100 text-green-700',
@@ -178,6 +183,30 @@ async function refreshPlant() {
   }
 }
 
+async function addShoppingItem() {
+  if (!shoppingItem.value.trim()) {
+    window.$toast?.error('Please enter an item')
+    return
+  }
+
+  savingShoppingItem.value = true
+  try {
+    await api.post('/shopping-list', {
+      item: shoppingItem.value.trim(),
+      plant_id: plant.value.id,
+      notes: shoppingNotes.value.trim() || null
+    })
+    window.$toast?.success('Added to shopping list')
+    showShoppingModal.value = false
+    shoppingItem.value = ''
+    shoppingNotes.value = ''
+  } catch (e) {
+    window.$toast?.error(e.message || 'Failed to add item')
+  } finally {
+    savingShoppingItem.value = false
+  }
+}
+
 const healthOptions = [
   { value: 'thriving', label: 'Thriving', emoji: '🌟', desc: 'Growing vigorously' },
   { value: 'healthy', label: 'Healthy', emoji: '✅', desc: 'Doing well' },
@@ -198,6 +227,14 @@ async function updateHealthStatus(status) {
     updatingHealth.value = false
   }
 }
+
+// Loading overlay state
+const isProcessing = computed(() => uploadingPhoto.value || updatingHealth.value)
+const loadingMessage = computed(() => {
+  if (uploadingPhoto.value) return 'Uploading photo...'
+  if (updatingHealth.value) return 'Updating health status...'
+  return 'Loading...'
+})
 </script>
 
 <template>
@@ -337,7 +374,18 @@ async function updateHealthStatus(status) {
 
       <!-- Plant details -->
       <div class="card p-4 mb-6">
-        <h2 class="font-semibold text-gray-900 mb-3">Details</h2>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold text-gray-900">Details</h2>
+          <button
+            @click="showShoppingModal = true"
+            class="text-sm text-plant-600 font-medium flex items-center gap-1 hover:text-plant-700"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+            Add to List
+          </button>
+        </div>
         <div class="grid grid-cols-2 gap-4 text-sm">
           <div>
             <span class="text-gray-500">Location</span>
@@ -349,7 +397,7 @@ async function updateHealthStatus(status) {
           </div>
           <div>
             <span class="text-gray-500">Soil</span>
-            <p class="font-medium capitalize">{{ plant.soil_type === 'water' ? 'Water (Propagation)' : plant.soil_type === 'rooting' ? 'Rooting Medium' : plant.soil_type || 'Not set' }}</p>
+            <p class="font-medium capitalize">{{ plant.soil_type === 'water' ? 'Water (Propagation)' : plant.soil_type === 'rooting' ? 'Rooting Medium' : plant.soil_type === 'moss' ? 'Moss Ball' : plant.soil_type || 'Not set' }}</p>
           </div>
           <div>
             <span class="text-gray-500">Light</span>
@@ -583,5 +631,51 @@ async function updateHealthStatus(status) {
       @close="showCareLogModal = false"
       @logged="handleCareLogged"
     />
+
+    <!-- Shopping List Modal -->
+    <div v-if="showShoppingModal" class="fixed inset-0 bg-black/50 flex items-end justify-center z-50">
+      <div class="bg-white rounded-t-3xl w-full max-w-lg p-6 safe-bottom">
+        <h3 class="text-lg font-semibold mb-2">Add to Shopping List</h3>
+        <p class="text-sm text-gray-500 mb-4">Add an item for {{ plant?.name }}</p>
+
+        <div class="space-y-4">
+          <div>
+            <label for="shopping-item" class="block text-sm font-medium text-gray-700 mb-1">Item *</label>
+            <input
+              id="shopping-item"
+              v-model="shoppingItem"
+              type="text"
+              class="input"
+              placeholder="e.g., New pot, Fertilizer, Moss pole..."
+            >
+          </div>
+
+          <div>
+            <label for="shopping-notes" class="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+            <input
+              id="shopping-notes"
+              v-model="shoppingNotes"
+              type="text"
+              class="input"
+              placeholder="Size, brand, etc..."
+            >
+          </div>
+        </div>
+
+        <div class="flex gap-3 mt-6">
+          <button @click="showShoppingModal = false" class="btn-secondary flex-1">Cancel</button>
+          <button @click="addShoppingItem" :disabled="savingShoppingItem" class="btn-primary flex-1">
+            <span v-if="savingShoppingItem" class="flex items-center justify-center gap-2">
+              <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              Adding...
+            </span>
+            <span v-else>Add to List</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <LoadingOverlay :visible="isProcessing" :message="loadingMessage" />
   </div>
 </template>

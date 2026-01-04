@@ -134,8 +134,17 @@ class CarePlanController
         $stmt->execute([$plantId]);
         $photo = $stmt->fetch();
 
-        // Deactivate existing care plans
+        // Deactivate existing care plans and delete pending tasks
         $stmt = db()->prepare('UPDATE care_plans SET is_active = 0 WHERE plant_id = ?');
+        $stmt->execute([$plantId]);
+
+        // Delete pending tasks from old care plans (keep completed/skipped for history)
+        $stmt = db()->prepare('
+            DELETE FROM tasks
+            WHERE plant_id = ?
+              AND completed_at IS NULL
+              AND skipped_at IS NULL
+        ');
         $stmt->execute([$plantId]);
 
         // Determine season

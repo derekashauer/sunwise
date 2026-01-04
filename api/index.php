@@ -155,6 +155,14 @@ $routes = [
     'GET /action-types' => ['CareLogController', 'getActionTypes', true],
     'POST /action-types' => ['CareLogController', 'createActionType', true],
     'DELETE /action-types/{id}' => ['CareLogController', 'deleteActionType', true],
+
+    // Shopping list routes
+    'GET /shopping-list' => ['ShoppingListController', 'index', true],
+    'POST /shopping-list' => ['ShoppingListController', 'store', true],
+    'PUT /shopping-list/{id}' => ['ShoppingListController', 'update', true],
+    'POST /shopping-list/{id}/toggle' => ['ShoppingListController', 'togglePurchased', true],
+    'DELETE /shopping-list/{id}' => ['ShoppingListController', 'destroy', true],
+    'DELETE /shopping-list/purchased' => ['ShoppingListController', 'clearPurchased', true],
 ];
 
 // Match route

@@ -445,12 +445,26 @@ Please provide personalized recommendations in the following JSON format:
   \"tips\": [\"Optional helpful tips specific to this plant\"]
 }
 
-Be specific to THIS plant's species, current health, and conditions. Do not give generic advice.";
+Be specific to THIS plant's species ({$task['species']}), current health ({$task['health_status']}), and conditions. Do not give generic advice.";
+
+        // Build full plant data for the chat method
+        $plant = [
+            'name' => $task['plant_name'],
+            'species' => $task['species'],
+            'pot_size' => $task['pot_size'],
+            'soil_type' => $task['soil_type'],
+            'light_condition' => $task['light_condition'],
+            'health_status' => $task['health_status'],
+            'notes' => $task['plant_notes'],
+            'location_name' => $task['location_name']
+        ];
 
         try {
-            $response = $aiService->chat([
-                ['role' => 'user', 'content' => $prompt]
-            ], $plantName);
+            $response = $aiService->chat(
+                $plant,
+                [['role' => 'user', 'content' => $prompt]],
+                [] // Additional context - already included in prompt
+            );
 
             // Parse JSON from response
             $content = $response['content'] ?? '';
@@ -603,6 +617,277 @@ Be specific to THIS plant's species, current health, and conditions. Do not give
     }
 
     /**
+     * Get AI-suggested schedule adjustment based on skip reason
+     */
+    public function adjustSchedule(array $params, array $body, ?int $userId): array
+    {
+        $taskId = $params['id'];
+        $reason = $body['reason'] ?? '';
+
+        // Get task with full details
+        $stmt = db()->prepare('
+            SELECT t.*,
+                   p.id as plant_id,
+                   p.name as plant_name,
+                   p.species,
+                   p.pot_size,
+                   p.soil_type,
+                   p.light_condition,
+                   p.health_status,
+                   p.user_id,
+                   l.name as location_name
+            FROM tasks t
+            JOIN plants p ON t.plant_id = p.id
+            LEFT JOIN locations l ON p.location_id = l.id
+            WHERE t.id = ?
+        ');
+        $stmt->execute([$taskId]);
+        $task = $stmt->fetch();
+
+        if (!$task || $task['user_id'] != $userId) {
+            return ['status' => 404, 'data' => ['error' => 'Task not found']];
+        }
+
+        // Get current recurrence
+        $recurrence = json_decode($task['recurrence'], true);
+        $currentInterval = $recurrence['interval'] ?? 7;
+
+        // Get skip history for this plant and task type
+        $stmt = db()->prepare('
+            SELECT COUNT(*) as skip_count,
+                   GROUP_CONCAT(notes) as reasons
+            FROM care_log
+            WHERE plant_id = ?
+              AND action LIKE ?
+              AND performed_at > datetime("now", "-30 days")
+        ');
+        $stmt->execute([$task['plant_id'], 'skipped_%']);
+        $skipHistory = $stmt->fetch();
+
+        // Try AI service for smart suggestion
+        try {
+            $aiService = $this->getAIService();
+            if ($aiService) {
+                $suggestion = $this->getAIScheduleSuggestion($aiService, $task, $reason, $currentInterval, $skipHistory);
+                if ($suggestion) {
+                    return $suggestion;
+                }
+            }
+        } catch (\Exception $e) {
+            error_log("AI schedule adjustment error: " . $e->getMessage());
+        }
+
+        // Fallback logic
+        return $this->getFallbackScheduleSuggestion($task, $reason, $currentInterval);
+    }
+
+    /**
+     * Get AI-powered schedule suggestion
+     */
+    private function getAIScheduleSuggestion($aiService, array $task, string $reason, int $currentInterval, array $skipHistory): ?array
+    {
+        $prompt = "You are a plant care expert. A user is skipping a {$task['task_type']} task for their {$task['species']} plant.
+
+Current schedule: Every {$currentInterval} days
+Skip reason: {$reason}
+Plant details:
+- Species: {$task['species']}
+- Pot size: {$task['pot_size']}
+- Soil type: {$task['soil_type']}
+- Light: {$task['light_condition']}
+- Health: {$task['health_status']}
+- Location: {$task['location_name']}
+
+Recent skip history (last 30 days): {$skipHistory['skip_count']} skips
+Previous skip reasons: " . ($skipHistory['reasons'] ?: 'None') . "
+
+Based on this information, suggest whether the schedule should be adjusted. Respond in JSON format:
+{
+  \"should_adjust\": true/false,
+  \"new_interval\": <number of days, or null if no change>,
+  \"suggestion\": \"<brief explanation for the user, 1-2 sentences>\",
+  \"reasoning\": \"<internal reasoning>\"
+}
+
+Consider:
+- If soil is still moist, the plant may need less frequent watering
+- Seasonal changes affect watering needs
+- The skip history pattern (frequent skips suggest schedule is too aggressive)
+- Species-specific needs";
+
+        $plant = [
+            'name' => $task['plant_name'],
+            'species' => $task['species'],
+            'pot_size' => $task['pot_size'],
+            'soil_type' => $task['soil_type'],
+            'light_condition' => $task['light_condition'],
+            'health_status' => $task['health_status']
+        ];
+
+        try {
+            $response = $aiService->chat(
+                $plant,
+                [['role' => 'user', 'content' => $prompt]],
+                []
+            );
+
+            $content = $response['content'] ?? '';
+
+            // Extract JSON
+            if (preg_match('/```(?:json)?\s*([\s\S]*?)```/', $content, $matches)) {
+                $content = $matches[1];
+            }
+
+            $result = json_decode(trim($content), true);
+
+            if ($result && isset($result['suggestion'])) {
+                return [
+                    'suggestion' => $result['suggestion'],
+                    'new_interval' => $result['new_interval'],
+                    'should_adjust' => $result['should_adjust'] ?? false,
+                    'adjustment' => [
+                        'type' => 'interval',
+                        'value' => $result['new_interval'],
+                        'task_type' => $task['task_type']
+                    ],
+                    'source' => 'ai'
+                ];
+            }
+        } catch (\Exception $e) {
+            error_log("AI schedule suggestion failed: " . $e->getMessage());
+        }
+
+        return null;
+    }
+
+    /**
+     * Fallback schedule suggestion when AI is unavailable
+     */
+    private function getFallbackScheduleSuggestion(array $task, string $reason, int $currentInterval): array
+    {
+        $newInterval = $currentInterval;
+        $suggestion = '';
+
+        // Simple heuristics based on reason
+        if (strpos(strtolower($reason), 'moist') !== false || strpos(strtolower($reason), 'wet') !== false) {
+            $newInterval = min($currentInterval + 2, $currentInterval * 1.5);
+            $suggestion = "Since the soil is still moist, I suggest extending watering to every " . round($newInterval) . " days.";
+        } elseif (strpos(strtolower($reason), 'recently') !== false || strpos(strtolower($reason), 'already') !== false) {
+            $newInterval = $currentInterval + 1;
+            $suggestion = "Extending the schedule slightly to every " . round($newInterval) . " days to avoid over-caring.";
+        } elseif (strpos(strtolower($reason), 'stressed') !== false) {
+            $suggestion = "When a plant is stressed, maintaining the current schedule is often best. Monitor closely.";
+        } else {
+            $suggestion = "Based on your feedback, consider adjusting to every " . ($currentInterval + 1) . " days.";
+            $newInterval = $currentInterval + 1;
+        }
+
+        return [
+            'suggestion' => $suggestion,
+            'new_interval' => round($newInterval),
+            'should_adjust' => true,
+            'adjustment' => [
+                'type' => 'interval',
+                'value' => round($newInterval),
+                'task_type' => $task['task_type']
+            ],
+            'source' => 'fallback'
+        ];
+    }
+
+    /**
+     * Apply schedule adjustment and skip task
+     */
+    public function applyAdjustment(array $params, array $body, ?int $userId): array
+    {
+        $taskId = $params['id'];
+        $reason = $body['reason'] ?? '';
+        $adjustment = $body['adjustment'] ?? null;
+
+        // Verify task ownership
+        $stmt = db()->prepare('
+            SELECT t.*, p.user_id, p.id as plant_id
+            FROM tasks t
+            JOIN plants p ON t.plant_id = p.id
+            WHERE t.id = ?
+        ');
+        $stmt->execute([$taskId]);
+        $task = $stmt->fetch();
+
+        if (!$task || $task['user_id'] != $userId) {
+            return ['status' => 404, 'data' => ['error' => 'Task not found']];
+        }
+
+        // Update the recurrence interval if adjustment provided
+        if ($adjustment && isset($adjustment['value'])) {
+            $recurrence = json_decode($task['recurrence'], true) ?: ['type' => 'days', 'interval' => 7];
+            $recurrence['interval'] = (int)$adjustment['value'];
+
+            // Update future tasks of same type
+            $stmt = db()->prepare('
+                UPDATE tasks
+                SET recurrence = ?
+                WHERE plant_id = ?
+                  AND task_type = ?
+                  AND completed_at IS NULL
+                  AND skipped_at IS NULL
+            ');
+            $stmt->execute([
+                json_encode($recurrence),
+                $task['plant_id'],
+                $task['task_type']
+            ]);
+
+            // Update care plan if exists - use dynamic field based on task type
+            $allowedTaskTypes = ['water', 'fertilize', 'mist', 'rotate', 'check'];
+            if (in_array($task['task_type'], $allowedTaskTypes)) {
+                $carePlanField = $task['task_type'] . '_frequency_days';
+                try {
+                    $stmt = db()->prepare("
+                        UPDATE care_plans
+                        SET $carePlanField = ?, updated_at = datetime('now')
+                        WHERE plant_id = ? AND is_active = 1
+                    ");
+                    $stmt->execute([(int)$adjustment['value'], $task['plant_id']]);
+                } catch (\Exception $e) {
+                    // Field might not exist, ignore
+                }
+            }
+        }
+
+        // Skip the current task
+        $stmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
+        $stmt->execute([$reason . ' (schedule adjusted)', $taskId]);
+
+        // Log to care log
+        $stmt = db()->prepare('
+            INSERT INTO care_log (plant_id, task_id, action, notes, outcome)
+            VALUES (?, ?, ?, ?, ?)
+        ');
+        $stmt->execute([
+            $task['plant_id'],
+            $taskId,
+            'schedule_adjusted_' . $task['task_type'],
+            $reason . ' - Adjusted to every ' . ($adjustment['value'] ?? '?') . ' days',
+            'positive'
+        ]);
+
+        // Generate next occurrence with new interval
+        if ($task['recurrence']) {
+            $newRecurrence = json_decode($task['recurrence'], true) ?: [];
+            $newRecurrence['interval'] = (int)($adjustment['value'] ?? $newRecurrence['interval'] ?? 7);
+            $task['recurrence'] = json_encode($newRecurrence);
+            $this->generateNextOccurrence($task);
+        }
+
+        return [
+            'success' => true,
+            'message' => 'Schedule updated and task skipped',
+            'new_interval' => $adjustment['value'] ?? null
+        ];
+    }
+
+    /**
      * Generate next occurrence of recurring task
      */
     private function generateNextOccurrence(array $task): void
@@ -614,6 +899,22 @@ Be specific to THIS plant's species, current health, and conditions. Do not give
         $type = $recurrence['type'] ?? 'days';
 
         $nextDate = date('Y-m-d', strtotime($task['due_date'] . " +$interval $type"));
+
+        // Check if a similar pending task already exists to prevent duplicates
+        $stmt = db()->prepare('
+            SELECT id FROM tasks
+            WHERE plant_id = ?
+              AND task_type = ?
+              AND due_date = ?
+              AND completed_at IS NULL
+              AND skipped_at IS NULL
+            LIMIT 1
+        ');
+        $stmt->execute([$task['plant_id'], $task['task_type'], $nextDate]);
+        if ($stmt->fetch()) {
+            // Task already exists for this date, skip creation
+            return;
+        }
 
         $stmt = db()->prepare('
             INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, instructions, priority)
