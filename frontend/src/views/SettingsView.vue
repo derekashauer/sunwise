@@ -724,7 +724,7 @@ const galleryUrl = computed(() => {
       <div class="space-y-3 text-sm">
         <div class="flex justify-between">
           <span class="text-gray-500">Version</span>
-          <span class="text-gray-900">0.4.1</span>
+          <span class="text-gray-900">0.4.2</span>
         </div>
         <div class="flex justify-between">
           <span class="text-gray-500">AI Providers</span>

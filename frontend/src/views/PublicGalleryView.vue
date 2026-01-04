@@ -103,17 +103,12 @@ function getHealthEmoji(status) {
           <div class="p-3">
             <h3 class="font-semibold text-gray-900 truncate">{{ plant.name }}</h3>
             <p v-if="plant.species" class="text-sm text-gray-500 truncate">{{ plant.species }}</p>
-            <div class="flex items-center gap-2 mt-2">
-              <span v-if="plant.health_status" class="text-sm">
-                <img
-                  :src="`https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/${getHealthEmoji(plant.health_status)}.svg`"
-                  class="w-4 h-4 inline"
-                  alt=""
-                >
-              </span>
-              <span v-if="plant.location_name" class="text-xs text-gray-400">
-                {{ plant.location_name }}
-              </span>
+            <div v-if="plant.health_status" class="mt-2">
+              <img
+                :src="`https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/${getHealthEmoji(plant.health_status)}.svg`"
+                class="w-4 h-4 inline"
+                alt=""
+              >
             </div>
           </div>
         </div>
