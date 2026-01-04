@@ -17,6 +17,10 @@ const expanded = ref(false)
 const loadingRecs = ref(false)
 const recommendations = ref(null)
 const recError = ref(null)
+const showNotesInput = ref(false)
+const notes = ref('')
+
+const emit = defineEmits(['completed'])
 
 const taskIcons = {
   water: '💧',
@@ -52,17 +56,30 @@ async function fetchRecommendations() {
   }
 }
 
-async function complete() {
+function handleCheckboxClick() {
+  if (props.completed) return
+  showNotesInput.value = true
+}
+
+async function complete(withNotes = false) {
   if (loading.value || props.completed) return
   loading.value = true
   try {
-    await tasks.completeTask(props.task.id)
+    await tasks.completeTask(props.task.id, withNotes ? notes.value : null)
     window.$toast?.success('Task completed!')
+    showNotesInput.value = false
+    notes.value = ''
+    emit('completed', props.task)
   } catch (error) {
     window.$toast?.error(error.message)
   } finally {
     loading.value = false
   }
+}
+
+function cancelNotes() {
+  showNotesInput.value = false
+  notes.value = ''
 }
 </script>
 
@@ -71,7 +88,7 @@ async function complete() {
     <div class="p-4 flex items-start gap-4">
       <!-- Checkbox -->
       <button
-        @click="complete"
+        @click="handleCheckboxClick"
         :disabled="loading || completed"
         class="w-6 h-6 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all"
         :class="completed
@@ -126,8 +143,40 @@ async function complete() {
       </div>
     </div>
 
+    <!-- Notes input for completing task -->
+    <div v-if="showNotesInput" class="px-4 pb-4 pt-0">
+      <div class="bg-plant-50 rounded-xl p-3 border border-plant-100">
+        <p class="text-sm text-gray-700 mb-2">Add a note about this care (optional)</p>
+        <textarea
+          v-model="notes"
+          rows="2"
+          class="input text-sm resize-none mb-2"
+          placeholder="e.g., Used 1 cup of water, leaves looking perky..."
+        ></textarea>
+        <div class="flex gap-2">
+          <button
+            @click="cancelNotes"
+            class="btn-secondary text-sm flex-1"
+          >
+            Cancel
+          </button>
+          <button
+            @click="complete(true)"
+            :disabled="loading"
+            class="btn-primary text-sm flex-1"
+          >
+            <span v-if="loading" class="flex items-center justify-center gap-2">
+              <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              Completing...
+            </span>
+            <span v-else>Complete Task</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- AI Recommendations (expandable) -->
-    <div v-if="expanded" class="px-4 pb-4 pt-0">
+    <div v-if="expanded && !showNotesInput" class="px-4 pb-4 pt-0">
       <!-- Loading state -->
       <div v-if="loadingRecs" class="bg-plant-50 rounded-xl p-4 border border-plant-100">
         <div class="flex items-center gap-3">

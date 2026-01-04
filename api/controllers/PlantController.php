@@ -49,8 +49,8 @@ class PlantController
 
         // Insert plant
         $stmt = db()->prepare('
-            INSERT INTO plants (user_id, name, species, pot_size, soil_type, light_condition, location_id, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO plants (user_id, name, species, pot_size, soil_type, light_condition, location_id, notes, parent_plant_id, propagation_date, is_propagation, has_grow_light, grow_light_hours)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ');
         $stmt->execute([
             $userId,
@@ -60,7 +60,12 @@ class PlantController
             $body['soil_type'] ?? 'standard',
             $body['light_condition'] ?? 'medium',
             $body['location_id'] ?? null,
-            $body['notes'] ?? null
+            $body['notes'] ?? null,
+            $body['parent_plant_id'] ?? null,
+            $body['propagation_date'] ?? null,
+            $body['is_propagation'] ?? 0,
+            $body['has_grow_light'] ?? 0,
+            $body['grow_light_hours'] ?? null
         ]);
 
         $plantId = db()->lastInsertId();
@@ -129,7 +134,7 @@ class PlantController
         }
 
         // Build update query dynamically
-        $allowedFields = ['name', 'species', 'pot_size', 'soil_type', 'light_condition', 'location_id', 'notes', 'health_status'];
+        $allowedFields = ['name', 'species', 'pot_size', 'soil_type', 'light_condition', 'location_id', 'notes', 'health_status', 'parent_plant_id', 'propagation_date', 'is_propagation', 'has_grow_light', 'grow_light_hours'];
         $updates = [];
         $values = [];
 

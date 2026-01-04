@@ -37,7 +37,12 @@ const form = ref({
   light_condition: 'medium',
   location_id: null,
   notes: '',
-  health_status: 'healthy'
+  health_status: 'healthy',
+  is_propagation: false,
+  propagation_date: null,
+  parent_plant_id: null,
+  has_grow_light: false,
+  grow_light_hours: null
 })
 
 const imageFile = ref(null)
@@ -55,6 +60,8 @@ const soilTypes = [
   { value: 'succulent', label: 'Succulent/Cactus Mix' },
   { value: 'orchid', label: 'Orchid Bark Mix' },
   { value: 'peat', label: 'Peat-Based Mix' },
+  { value: 'water', label: 'Water (Propagation)' },
+  { value: 'rooting', label: 'Rooting Medium' },
   { value: 'custom', label: 'Custom Mix' }
 ]
 
@@ -72,8 +79,15 @@ const healthStatuses = [
   { value: 'critical', label: 'Critical', emoji: '1f6a8', desc: 'Urgent care needed' }
 ]
 
+// All plants for parent selection
+const allPlants = ref([])
+
 onMounted(async () => {
   await locationsStore.fetchLocations()
+
+  // Load all plants for parent selection
+  await plants.fetchPlants()
+  allPlants.value = plants.plants.filter(p => !p.is_propagation) // Only show non-propagations as parents
 
   if (isEditing.value) {
     try {
@@ -86,7 +100,12 @@ onMounted(async () => {
         light_condition: plant.light_condition || 'medium',
         location_id: plant.location_id || null,
         notes: plant.notes || '',
-        health_status: plant.health_status || 'healthy'
+        health_status: plant.health_status || 'healthy',
+        is_propagation: !!plant.is_propagation,
+        propagation_date: plant.propagation_date || null,
+        parent_plant_id: plant.parent_plant_id || null,
+        has_grow_light: !!plant.has_grow_light,
+        grow_light_hours: plant.grow_light_hours || null
       }
       if (plant.thumbnail) {
         imagePreview.value = `/uploads/plants/${plant.thumbnail}`
@@ -96,7 +115,7 @@ onMounted(async () => {
       if (plant.species_candidates && !plant.species_confirmed) {
         try {
           speciesCandidates.value = JSON.parse(plant.species_candidates)
-          if (speciesCandidates.value.length > 1) {
+          if (speciesCandidates.value.length >= 1) {
             pendingPlantId.value = plant.id
             showSpeciesPicker.value = true
           }
@@ -171,8 +190,12 @@ async function handleSubmit() {
   try {
     const formData = new FormData()
     Object.keys(form.value).forEach(key => {
-      if (form.value[key]) {
-        formData.append(key, form.value[key])
+      const val = form.value[key]
+      // Convert booleans to 0/1 for PHP
+      if (typeof val === 'boolean') {
+        formData.append(key, val ? '1' : '0')
+      } else if (val !== null && val !== '') {
+        formData.append(key, val)
       }
     })
 
@@ -193,7 +216,7 @@ async function handleSubmit() {
           const updatedPlant = await plants.getPlant(plant.id)
           if (updatedPlant.species_candidates && !updatedPlant.species_confirmed) {
             const candidates = JSON.parse(updatedPlant.species_candidates)
-            if (candidates.length > 1) {
+            if (candidates.length >= 1) {
               speciesCandidates.value = candidates
               pendingPlantId.value = plant.id
               showSpeciesPicker.value = true
@@ -405,8 +428,8 @@ function skipSpeciesSelection() {
         </div>
       </div>
 
-      <!-- Pot size -->
-      <div>
+      <!-- Pot size (hide for propagations in water) -->
+      <div v-if="!form.is_propagation || (form.soil_type !== 'water' && form.soil_type !== 'rooting')">
         <label class="block text-sm font-medium text-gray-700 mb-2">Pot Size</label>
         <div class="grid grid-cols-2 gap-2">
           <button
@@ -426,8 +449,8 @@ function skipSpeciesSelection() {
         </div>
       </div>
 
-      <!-- Soil type -->
-      <div>
+      <!-- Soil type (hide for propagations) -->
+      <div v-if="!form.is_propagation">
         <label for="soil" class="block text-sm font-medium text-gray-700 mb-1">Soil Type</label>
         <select id="soil" v-model="form.soil_type" class="input">
           <option v-for="soil in soilTypes" :key="soil.value" :value="soil.value">
@@ -454,6 +477,93 @@ function skipSpeciesSelection() {
               {{ light.label }}
             </span>
           </button>
+        </div>
+      </div>
+
+      <!-- Grow Light -->
+      <div class="p-4 rounded-xl border-2 border-gray-200 space-y-3">
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            v-model="form.has_grow_light"
+            class="w-5 h-5 rounded border-gray-300 text-plant-600 focus:ring-plant-500"
+          >
+          <div>
+            <span class="text-sm font-medium text-gray-700">Has Grow Light</span>
+            <span class="text-xs text-gray-500 block">Supplemental artificial lighting</span>
+          </div>
+        </label>
+        <div v-if="form.has_grow_light" class="ml-8">
+          <label for="grow-hours" class="block text-sm text-gray-600 mb-1">Hours per day</label>
+          <input
+            id="grow-hours"
+            type="number"
+            v-model="form.grow_light_hours"
+            min="1"
+            max="24"
+            class="input w-24"
+            placeholder="12"
+          >
+        </div>
+      </div>
+
+      <!-- Propagation -->
+      <div class="p-4 rounded-xl border-2 border-gray-200 space-y-3">
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            v-model="form.is_propagation"
+            class="w-5 h-5 rounded border-gray-300 text-plant-600 focus:ring-plant-500"
+          >
+          <div>
+            <span class="text-sm font-medium text-gray-700">This is a Propagation</span>
+            <span class="text-xs text-gray-500 block">Cutting or baby plant in water/rooting medium</span>
+          </div>
+        </label>
+        <div v-if="form.is_propagation" class="ml-8 space-y-3">
+          <div>
+            <label class="block text-sm text-gray-600 mb-1">Propagation Medium</label>
+            <div class="flex gap-2">
+              <button
+                type="button"
+                @click="form.soil_type = 'water'"
+                class="flex-1 p-2 rounded-lg border-2 text-sm transition-all"
+                :class="form.soil_type === 'water'
+                  ? 'border-plant-500 bg-plant-50 text-plant-700'
+                  : 'border-gray-200 hover:border-gray-300 text-gray-700'"
+              >
+                💧 Water
+              </button>
+              <button
+                type="button"
+                @click="form.soil_type = 'rooting'"
+                class="flex-1 p-2 rounded-lg border-2 text-sm transition-all"
+                :class="form.soil_type === 'rooting'
+                  ? 'border-plant-500 bg-plant-50 text-plant-700'
+                  : 'border-gray-200 hover:border-gray-300 text-gray-700'"
+              >
+                🌱 Rooting Medium
+              </button>
+            </div>
+          </div>
+          <div>
+            <label for="prop-date" class="block text-sm text-gray-600 mb-1">Propagation Date</label>
+            <input
+              id="prop-date"
+              type="date"
+              v-model="form.propagation_date"
+              class="input"
+            >
+          </div>
+          <div v-if="allPlants.length > 0">
+            <label for="parent-plant" class="block text-sm text-gray-600 mb-1">Parent Plant (optional)</label>
+            <select id="parent-plant" v-model="form.parent_plant_id" class="input">
+              <option :value="null">None</option>
+              <option v-for="p in allPlants" :key="p.id" :value="p.id">
+                {{ p.name }} ({{ p.species || 'Unknown species' }})
+              </option>
+            </select>
+          </div>
         </div>
       </div>
 

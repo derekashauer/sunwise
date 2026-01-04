@@ -81,6 +81,7 @@ $routes = [
     // Plant routes
     'GET /plants' => ['PlantController', 'index', true],
     'POST /plants' => ['PlantController', 'store', true],
+    'GET /plants/generate-name' => ['PlantController', 'generateName', true],
     'GET /plants/{id}' => ['PlantController', 'show', true],
     'PUT /plants/{id}' => ['PlantController', 'update', true],
     'DELETE /plants/{id}' => ['PlantController', 'destroy', true],
@@ -88,7 +89,6 @@ $routes = [
     'GET /plants/{id}/photos' => ['PhotoController', 'index', true],
     'GET /plants/{id}/care-plan' => ['CarePlanController', 'show', true],
     'POST /plants/{id}/care-plan/regenerate' => ['CarePlanController', 'regenerate', true],
-    'GET /plants/{id}/care-log' => ['CarePlanController', 'careLog', true],
 
     // Plant chat routes
     'POST /plants/{id}/chat' => ['ChatController', 'chat', true],
@@ -144,11 +144,17 @@ $routes = [
     // Public gallery view (no auth)
     'GET /gallery/{token}' => ['GalleryController', 'show'],
 
-    // Plant name generator
-    'GET /plants/generate-name' => ['PlantController', 'generateName', true],
-
     // Species confirmation
     'POST /plants/{id}/confirm-species' => ['PlantController', 'confirmSpecies', true],
+
+    // Care log routes
+    'GET /plants/{id}/care-log' => ['CareLogController', 'index', true],
+    'POST /plants/{id}/care-log' => ['CareLogController', 'store', true],
+
+    // Action types routes
+    'GET /action-types' => ['CareLogController', 'getActionTypes', true],
+    'POST /action-types' => ['CareLogController', 'createActionType', true],
+    'DELETE /action-types/{id}' => ['CareLogController', 'deleteActionType', true],
 ];
 
 // Match route

@@ -94,8 +94,8 @@ async function loadGallerySettings() {
   galleryLoading.value = true
   try {
     gallerySettings.value = await api.get('/settings/public-gallery')
-    galleryEnabled.value = !!gallerySettings.value.public_gallery_enabled
-    galleryName.value = gallerySettings.value.public_gallery_name || ''
+    galleryEnabled.value = !!gallerySettings.value.enabled
+    galleryName.value = gallerySettings.value.name || ''
   } catch (e) {
     console.error('Failed to load gallery settings:', e)
   } finally {
@@ -264,8 +264,8 @@ async function saveGallerySettings() {
 }
 
 function copyGalleryLink() {
-  if (!gallerySettings.value?.public_gallery_token) return
-  const url = `${window.location.origin}/gallery/${gallerySettings.value.public_gallery_token}`
+  if (!gallerySettings.value?.token) return
+  const url = `${window.location.origin}/gallery/${gallerySettings.value.token}`
   navigator.clipboard.writeText(url)
   window.$toast?.success('Link copied to clipboard!')
 }
@@ -278,8 +278,8 @@ function logout() {
 const canSetClaudeDefault = computed(() => aiSettings.value?.has_claude_key)
 const canSetOpenaiDefault = computed(() => aiSettings.value?.has_openai_key)
 const galleryUrl = computed(() => {
-  if (!gallerySettings.value?.public_gallery_token) return null
-  return `${window.location.origin}/gallery/${gallerySettings.value.public_gallery_token}`
+  if (!gallerySettings.value?.token) return null
+  return `${window.location.origin}/gallery/${gallerySettings.value.token}`
 })
 </script>
 
@@ -680,21 +680,26 @@ const galleryUrl = computed(() => {
             >
           </div>
 
-          <div v-if="gallerySettings?.public_gallery_token" class="p-3 bg-gray-50 rounded-xl">
-            <p class="text-sm font-medium text-gray-700 mb-1">Your Gallery Link</p>
-            <div class="flex items-center gap-2">
+          <div v-if="gallerySettings?.token" class="p-3 bg-plant-50 rounded-xl border border-plant-200">
+            <p class="text-sm font-medium text-plant-800 mb-2">Share Your Gallery</p>
+            <div class="flex items-stretch gap-2">
               <input
                 :value="galleryUrl"
                 readonly
-                class="input text-sm flex-1 bg-white"
+                class="input text-sm flex-1 bg-white font-mono text-xs"
+                @click="$event.target.select()"
               >
               <button
                 @click="copyGalleryLink"
-                class="btn-secondary text-sm px-3 py-2"
+                class="btn-primary text-sm px-4 flex items-center gap-1.5"
               >
-                Copy
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                Copy Link
               </button>
             </div>
+            <p class="text-xs text-plant-600 mt-2">Anyone with this link can view your plant collection</p>
           </div>
 
           <button
@@ -719,7 +724,7 @@ const galleryUrl = computed(() => {
       <div class="space-y-3 text-sm">
         <div class="flex justify-between">
           <span class="text-gray-500">Version</span>
-          <span class="text-gray-900">0.3.0</span>
+          <span class="text-gray-900">0.4.1</span>
         </div>
         <div class="flex justify-between">
           <span class="text-gray-500">AI Providers</span>

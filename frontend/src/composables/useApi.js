@@ -76,11 +76,15 @@ export function useApi() {
     return json
   }
 
+  // Alias for upload - for form data posts
+  const postForm = upload
+
   return {
     get: (endpoint) => request('GET', endpoint),
     post: (endpoint, data) => request('POST', endpoint, data),
     put: (endpoint, data) => request('PUT', endpoint, data),
     delete: (endpoint) => request('DELETE', endpoint),
-    upload
+    upload,
+    postForm
   }
 }

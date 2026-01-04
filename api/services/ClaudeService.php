@@ -69,7 +69,7 @@ Respond ONLY with valid JSON in this exact format:
     "notes": "Any additional observations"
 }
 
-Include the "candidates" array only if confidence is below 0.9 or if the plant could reasonably be one of several similar species. If very confident (0.9+), candidates can be omitted or contain only the single match.
+ALWAYS include the "candidates" array with at least 1 entry (the best match). Include up to 3 candidates if the plant could reasonably be one of several similar species.
 PROMPT;
 
         $response = $this->sendRequest([
@@ -162,6 +162,25 @@ PROMPT;
         $plantInfo .= "\nCurrent health: " . ($plant['health_status'] ?? 'unknown');
         $plantInfo .= "\nSeason: $season";
 
+        // Propagation info
+        if (!empty($plant['is_propagation'])) {
+            $plantInfo .= "\nPROPAGATION: This is a cutting/propagation, NOT a mature plant";
+            if (!empty($plant['propagation_date'])) {
+                $plantInfo .= "\nPropagation started: " . $plant['propagation_date'];
+            }
+            if ($plant['soil_type'] === 'water') {
+                $plantInfo .= "\nGrowing medium: Water (water propagation)";
+            } elseif ($plant['soil_type'] === 'rooting') {
+                $plantInfo .= "\nGrowing medium: Rooting medium";
+            }
+        }
+
+        // Grow light info
+        if (!empty($plant['has_grow_light'])) {
+            $hours = $plant['grow_light_hours'] ?? 'unspecified';
+            $plantInfo .= "\nGrow light: Yes, {$hours} hours/day";
+        }
+
         $careHistory = "";
         if (!empty($careLog)) {
             $careHistory = "\n\nRecent care history:\n";
@@ -197,7 +216,7 @@ Respond ONLY with valid JSON:
     "photo_check_reason": "Why you're requesting a photo then",
     "tasks": [
         {
-            "type": "water|fertilize|trim|repot|rotate|mist|check",
+            "type": "water|fertilize|trim|repot|rotate|mist|check|change_water|check_roots|pot_up",
             "due_date": "YYYY-MM-DD",
             "recurrence": {"type": "days", "interval": 7},
             "instructions": "Specific instructions for this task",
@@ -207,6 +226,17 @@ Respond ONLY with valid JSON:
 }
 
 Include 3-5 different task types. Set reasonable intervals based on plant type and season.
+
+IMPORTANT for propagations:
+- If this is a propagation in water, use "change_water" instead of "water" (every 3-7 days)
+- Add "check_roots" tasks to monitor root development
+- Add "pot_up" task when roots should be ready (usually 4-8 weeks)
+- Skip fertilizing until roots are established
+- Misting is more important for cuttings
+
+IMPORTANT for grow lights:
+- Consider grow light hours when scheduling. More light = more water needed
+- Grow lights can compensate for low natural light conditions
 PROMPT;
 
         $response = $this->sendRequest([
@@ -317,6 +347,20 @@ INST;
         $prompt .= "- Soil type: " . ($plant['soil_type'] ?? 'Not specified') . "\n";
         $prompt .= "- Light condition: " . ($plant['light_condition'] ?? 'Not specified') . "\n";
         $prompt .= "- Health status: " . ($plant['health_status'] ?? 'Unknown') . "\n";
+
+        // Propagation info
+        if (!empty($plant['is_propagation'])) {
+            $prompt .= "- STATUS: This is a PROPAGATION/CUTTING, not a mature plant\n";
+            if (!empty($plant['propagation_date'])) {
+                $prompt .= "- Propagation started: " . $plant['propagation_date'] . "\n";
+            }
+        }
+
+        // Grow light info
+        if (!empty($plant['has_grow_light'])) {
+            $hours = $plant['grow_light_hours'] ?? 'unspecified';
+            $prompt .= "- Grow light: Yes, {$hours} hours/day\n";
+        }
 
         if (!empty($plant['notes'])) {
             $prompt .= "- User notes: " . $plant['notes'] . "\n";

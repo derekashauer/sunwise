@@ -6,6 +6,8 @@ import { useTasksStore } from '@/stores/tasks'
 import { useApi } from '@/composables/useApi'
 import TaskItem from '@/components/tasks/TaskItem.vue'
 import PlantChatModal from '@/components/chat/PlantChatModal.vue'
+import CareLogModal from '@/components/care/CareLogModal.vue'
+import CareLogEntry from '@/components/care/CareLogEntry.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -24,6 +26,14 @@ const showDeleteConfirm = ref(false)
 const showChat = ref(false)
 const showHealthPicker = ref(false)
 const updatingHealth = ref(false)
+const parentPlant = ref(null)
+const childPlants = ref([])
+const careLog = ref([])
+const actionTypes = ref({ preset: [], custom: [] })
+const showCareLog = ref(false)
+const showCareLogModal = ref(false)
+const careLogFilter = ref('')
+const showAllCareLog = ref(false)
 
 const healthColors = {
   thriving: 'bg-green-100 text-green-700',
@@ -35,15 +45,32 @@ const healthColors = {
 
 onMounted(async () => {
   try {
-    const [plantData, photosData, carePlanData] = await Promise.all([
+    const [plantData, photosData, carePlanData, careLogData, actionTypesData] = await Promise.all([
       plants.getPlant(route.params.id),
       plants.getPhotos(route.params.id),
-      api.get(`/plants/${route.params.id}/care-plan`)
+      api.get(`/plants/${route.params.id}/care-plan`),
+      api.get(`/plants/${route.params.id}/care-log`),
+      api.get('/action-types')
     ])
     plant.value = plantData
     photos.value = photosData
     carePlan.value = carePlanData.care_plan
     tasks.value = carePlanData.tasks || []
+    careLog.value = careLogData.care_log || []
+    actionTypes.value = actionTypesData
+
+    // Load parent plant if this is a propagation
+    if (plantData.parent_plant_id) {
+      try {
+        parentPlant.value = await plants.getPlant(plantData.parent_plant_id)
+      } catch (e) {
+        console.error('Failed to load parent plant:', e)
+      }
+    }
+
+    // Load children (propagations from this plant)
+    await plants.fetchPlants()
+    childPlants.value = plants.plants.filter(p => p.parent_plant_id === plantData.id)
   } catch (e) {
     window.$toast?.error('Failed to load plant')
     router.back()
@@ -108,6 +135,34 @@ async function deletePlant() {
 }
 
 const upcomingTasks = computed(() => tasks.value.filter(t => !t.completed_at))
+
+const filteredCareLog = computed(() => {
+  if (!careLogFilter.value) return careLog.value
+  return careLog.value.filter(e => e.action === careLogFilter.value)
+})
+
+const displayedCareLog = computed(() => {
+  const logs = filteredCareLog.value
+  return showAllCareLog.value ? logs : logs.slice(0, 5)
+})
+
+const allActionsList = computed(() => [
+  ...actionTypes.value.preset,
+  ...actionTypes.value.custom
+])
+
+function handleCareLogged(entry) {
+  careLog.value.unshift(entry)
+}
+
+async function refreshCareLog() {
+  try {
+    const careLogData = await api.get(`/plants/${route.params.id}/care-log`)
+    careLog.value = careLogData.care_log || []
+  } catch (e) {
+    console.error('Failed to refresh care log:', e)
+  }
+}
 
 async function refreshPlant() {
   try {
@@ -204,17 +259,27 @@ async function updateHealthStatus(status) {
           </svg>
         </div>
 
-        <!-- Health badge (clickable to change) -->
-        <button
-          @click="showHealthPicker = true"
-          class="absolute top-3 right-3 px-3 py-1 text-sm font-medium rounded-full capitalize flex items-center gap-1 shadow-sm"
-          :class="healthColors[plant.health_status] || 'bg-gray-100 text-gray-500'"
-        >
-          {{ plant.health_status || 'Set status' }}
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+        <!-- Badges -->
+        <div class="absolute top-3 right-3 flex flex-col gap-2 items-end">
+          <!-- Propagation badge -->
+          <span
+            v-if="plant.is_propagation"
+            class="px-3 py-1 text-sm font-medium rounded-full bg-purple-100 text-purple-700 shadow-sm"
+          >
+            Propagation
+          </span>
+          <!-- Health badge (clickable to change) -->
+          <button
+            @click="showHealthPicker = true"
+            class="px-3 py-1 text-sm font-medium rounded-full capitalize flex items-center gap-1 shadow-sm"
+            :class="healthColors[plant.health_status] || 'bg-gray-100 text-gray-500'"
+          >
+            {{ plant.health_status || 'Set status' }}
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        </div>
 
         <!-- Add photo button -->
         <button
@@ -229,13 +294,55 @@ async function updateHealthStatus(status) {
         </button>
       </div>
 
+      <!-- Propagation / Parent / Children links -->
+      <div v-if="plant.is_propagation || parentPlant || childPlants.length > 0" class="card p-4 mb-6">
+        <!-- Parent plant link -->
+        <div v-if="parentPlant" class="flex items-center gap-3 mb-3">
+          <span class="text-gray-500 text-sm">Parent:</span>
+          <router-link
+            :to="`/plants/${parentPlant.id}`"
+            class="flex items-center gap-2 text-plant-600 hover:text-plant-700"
+          >
+            <img
+              v-if="parentPlant.thumbnail"
+              :src="`/uploads/plants/${parentPlant.thumbnail}`"
+              class="w-8 h-8 rounded-full object-cover"
+            >
+            <div v-else class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19V6M12 6c-1.5-2-4-3-6-2 2.5.5 4 2.5 5 4.5M12 6c1.5-2 4-3 6-2-2.5.5-4 2.5-5 4.5M8 21h8" />
+              </svg>
+            </div>
+            <span class="font-medium">{{ parentPlant.name }}</span>
+          </router-link>
+        </div>
+        <!-- Propagation date -->
+        <div v-if="plant.propagation_date" class="text-sm text-gray-500 mb-3">
+          Started propagating: {{ new Date(plant.propagation_date).toLocaleDateString() }}
+        </div>
+        <!-- Child propagations -->
+        <div v-if="childPlants.length > 0">
+          <span class="text-gray-500 text-sm block mb-2">Propagations from this plant:</span>
+          <div class="flex flex-wrap gap-2">
+            <router-link
+              v-for="child in childPlants"
+              :key="child.id"
+              :to="`/plants/${child.id}`"
+              class="flex items-center gap-2 px-3 py-1.5 bg-purple-50 text-purple-700 rounded-full text-sm hover:bg-purple-100"
+            >
+              <span>{{ child.name }}</span>
+            </router-link>
+          </div>
+        </div>
+      </div>
+
       <!-- Plant details -->
       <div class="card p-4 mb-6">
         <h2 class="font-semibold text-gray-900 mb-3">Details</h2>
         <div class="grid grid-cols-2 gap-4 text-sm">
           <div>
             <span class="text-gray-500">Location</span>
-            <p class="font-medium">{{ plant.location || 'Not set' }}</p>
+            <p class="font-medium">{{ plant.location_name || plant.location || 'Not set' }}</p>
           </div>
           <div>
             <span class="text-gray-500">Pot Size</span>
@@ -243,11 +350,15 @@ async function updateHealthStatus(status) {
           </div>
           <div>
             <span class="text-gray-500">Soil</span>
-            <p class="font-medium capitalize">{{ plant.soil_type || 'Not set' }}</p>
+            <p class="font-medium capitalize">{{ plant.soil_type === 'water' ? 'Water (Propagation)' : plant.soil_type === 'rooting' ? 'Rooting Medium' : plant.soil_type || 'Not set' }}</p>
           </div>
           <div>
             <span class="text-gray-500">Light</span>
             <p class="font-medium capitalize">{{ plant.light_condition || 'Not set' }}</p>
+          </div>
+          <div v-if="plant.has_grow_light">
+            <span class="text-gray-500">Grow Light</span>
+            <p class="font-medium">{{ plant.grow_light_hours ? `${plant.grow_light_hours} hrs/day` : 'Yes' }}</p>
           </div>
         </div>
         <p v-if="plant.notes" class="mt-4 text-sm text-gray-600 border-t pt-4">
@@ -282,6 +393,68 @@ async function updateHealthStatus(status) {
         </div>
         <div v-else class="card p-4 text-center text-gray-500">
           <p>No upcoming tasks scheduled</p>
+        </div>
+      </div>
+
+      <!-- Care History -->
+      <div class="mb-6">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold text-gray-900">Care History</h2>
+          <button
+            @click="showCareLogModal = true"
+            class="text-sm text-plant-600 font-medium flex items-center gap-1 hover:text-plant-700"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Log Care
+          </button>
+        </div>
+
+        <div v-if="careLog.length > 0" class="card">
+          <!-- Filter dropdown -->
+          <div v-if="careLog.length > 3" class="p-3 border-b">
+            <select
+              v-model="careLogFilter"
+              class="input text-sm py-1.5"
+            >
+              <option value="">All Activities</option>
+              <option v-for="action in allActionsList" :key="action.value" :value="action.value">
+                {{ action.icon }} {{ action.label }}
+              </option>
+            </select>
+          </div>
+
+          <!-- Log entries -->
+          <div class="divide-y">
+            <CareLogEntry
+              v-for="entry in displayedCareLog"
+              :key="entry.id"
+              :entry="entry"
+              :action-types="actionTypes"
+              class="px-4"
+            />
+          </div>
+
+          <!-- Show more/less -->
+          <div v-if="filteredCareLog.length > 5" class="p-3 border-t">
+            <button
+              @click="showAllCareLog = !showAllCareLog"
+              class="text-sm text-plant-600 font-medium w-full text-center hover:text-plant-700"
+            >
+              {{ showAllCareLog ? 'Show Less' : `View All (${filteredCareLog.length})` }}
+            </button>
+          </div>
+        </div>
+
+        <div v-else class="card p-4 text-center text-gray-500">
+          <p class="mb-2">No care activities logged yet</p>
+          <button
+            @click="showCareLogModal = true"
+            class="text-sm text-plant-600 font-medium hover:text-plant-700"
+          >
+            Log your first care activity
+          </button>
         </div>
       </div>
 
@@ -402,5 +575,14 @@ async function updateHealthStatus(status) {
         </button>
       </div>
     </div>
+
+    <!-- Care Log Modal -->
+    <CareLogModal
+      v-if="plant"
+      :plant-id="plant.id"
+      :visible="showCareLogModal"
+      @close="showCareLogModal = false"
+      @logged="handleCareLogged"
+    />
   </div>
 </template>
