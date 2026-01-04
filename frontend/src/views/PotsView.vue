@@ -11,6 +11,8 @@ const showEditModal = ref(false)
 const editingPot = ref(null)
 const saving = ref(false)
 const deleting = ref(false)
+const uploadingPhoto = ref(false)
+const photoInput = ref(null)
 
 // Form data
 const form = ref({
@@ -153,6 +155,34 @@ function getSizeLabel(size) {
 function getMaterialLabel(material) {
   return materialOptions.find(m => m.value === material)?.label || material
 }
+
+function triggerPhotoUpload() {
+  photoInput.value?.click()
+}
+
+async function uploadPhoto(event) {
+  const file = event.target.files?.[0]
+  if (!file || !editingPot.value) return
+
+  uploadingPhoto.value = true
+  try {
+    const formData = new FormData()
+    formData.append('image', file)
+
+    await api.upload(`/pots/${editingPot.value.id}/photo`, formData)
+    window.$toast?.success('Photo uploaded')
+    await loadPots()
+
+    // Update the editing pot with new image
+    const updated = pots.value.find(p => p.id === editingPot.value.id)
+    if (updated) editingPot.value = updated
+  } catch (e) {
+    window.$toast?.error(e.message || 'Failed to upload photo')
+  } finally {
+    uploadingPhoto.value = false
+    if (photoInput.value) photoInput.value.value = ''
+  }
+}
 </script>
 
 <template>
@@ -278,6 +308,40 @@ function getMaterialLabel(material) {
     <div v-if="showAddModal || showEditModal" class="fixed inset-0 bg-black/50 flex items-end justify-center z-50">
       <div class="bg-white rounded-t-3xl w-full max-w-lg p-6 safe-bottom max-h-[90vh] overflow-y-auto">
         <h3 class="text-lg font-semibold mb-4">{{ editingPot ? 'Edit Pot' : 'Add Pot' }}</h3>
+
+        <!-- Photo upload for editing -->
+        <div v-if="editingPot" class="mb-4">
+          <div class="relative aspect-square w-32 mx-auto rounded-xl overflow-hidden bg-gray-100">
+            <img
+              v-if="editingPot.image"
+              :src="`/uploads/plants/${editingPot.image_thumbnail || editingPot.image}`"
+              class="w-full h-full object-cover"
+            >
+            <div v-else class="w-full h-full flex items-center justify-center">
+              <svg class="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+              </svg>
+            </div>
+            <button
+              @click="triggerPhotoUpload"
+              :disabled="uploadingPhoto"
+              class="absolute bottom-2 right-2 bg-white/90 hover:bg-white rounded-full p-2 shadow-md"
+            >
+              <svg v-if="!uploadingPhoto" class="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <div v-else class="w-4 h-4 border-2 border-gray-700 border-t-transparent rounded-full animate-spin"></div>
+            </button>
+          </div>
+          <input
+            ref="photoInput"
+            type="file"
+            accept="image/*"
+            class="hidden"
+            @change="uploadPhoto"
+          >
+        </div>
 
         <div class="space-y-4">
           <!-- Name -->

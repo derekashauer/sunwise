@@ -91,6 +91,12 @@ const routes = [
     name: 'public-gallery',
     component: () => import('@/views/PublicGalleryView.vue'),
     meta: { requiresAuth: false, isGuest: true }
+  },
+  {
+    path: '/plant/:id',
+    name: 'plant-share',
+    component: () => import('@/views/PlantShareView.vue'),
+    meta: { requiresAuth: false, isGuest: true }
   }
 ]
 

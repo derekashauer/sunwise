@@ -79,6 +79,7 @@ $routes = [
     'POST /auth/logout' => ['AuthController', 'logout', true],
 
     // Plant routes
+    'GET /plants/share/{id}' => ['PlantController', 'publicShare'], // Public, no auth
     'GET /plants' => ['PlantController', 'index', true],
     'GET /plants/archived' => ['PlantController', 'archived', true],
     'POST /plants' => ['PlantController', 'store', true],

@@ -36,6 +36,10 @@ const confirmingSpecies = ref(false)
 const showCarePlanPrompt = ref(false)
 const regeneratingCarePlan = ref(false)
 
+// Share modal
+const showShareModal = ref(false)
+const newPlantForShare = ref(null)
+
 const form = ref({
   name: '',
   species: '',
@@ -272,7 +276,9 @@ async function confirmSpecies() {
     })
     window.$toast?.success('Species confirmed!')
     showSpeciesPicker.value = false
-    router.replace(`/plants/${pendingPlantId.value}`)
+    // Show share modal for new plants
+    newPlantForShare.value = { id: pendingPlantId.value, name: form.value.name }
+    showShareModal.value = true
   } catch (e) {
     window.$toast?.error('Failed to confirm species')
   } finally {
@@ -288,7 +294,45 @@ function selectSpeciesCandidate(species) {
 function skipSpeciesSelection() {
   showSpeciesPicker.value = false
   if (pendingPlantId.value) {
-    router.replace(`/plants/${pendingPlantId.value}`)
+    // Show share modal for new plants
+    newPlantForShare.value = { id: pendingPlantId.value, name: form.value.name }
+    showShareModal.value = true
+  }
+}
+
+function getShareUrl() {
+  return `${window.location.origin}/plant/${newPlantForShare.value?.id}`
+}
+
+async function shareNative() {
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: `${newPlantForShare.value?.name} - Sunwise`,
+        text: `Check out my plant ${newPlantForShare.value?.name}!`,
+        url: getShareUrl()
+      })
+    } catch (e) {
+      // User cancelled
+    }
+  } else {
+    copyShareLink()
+  }
+}
+
+async function copyShareLink() {
+  try {
+    await navigator.clipboard.writeText(getShareUrl())
+    window.$toast?.success('Link copied!')
+  } catch (e) {
+    window.$toast?.error('Failed to copy link')
+  }
+}
+
+function closeShareAndNavigate() {
+  showShareModal.value = false
+  if (newPlantForShare.value?.id) {
+    router.replace(`/plants/${newPlantForShare.value.id}`)
   }
 }
 
@@ -790,6 +834,47 @@ function skipCarePlanUpdate() {
             <span v-else>Update Plan</span>
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- Share Modal -->
+    <div v-if="showShareModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div class="bg-white rounded-2xl max-w-sm w-full p-6 text-center">
+        <div class="w-16 h-16 mx-auto mb-4 bg-plant-100 rounded-full flex items-center justify-center">
+          <svg class="w-8 h-8 text-plant-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <h3 class="text-xl font-bold text-gray-900 mb-2">Plant Added!</h3>
+        <p class="text-gray-500 mb-6">Share {{ newPlantForShare?.name }} with friends and family</p>
+
+        <div class="space-y-3 mb-6">
+          <button
+            @click="shareNative"
+            class="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-plant-500 text-white rounded-xl font-medium hover:bg-plant-600 transition-colors"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+            </svg>
+            Share
+          </button>
+          <button
+            @click="copyShareLink"
+            class="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            Copy Link
+          </button>
+        </div>
+
+        <button
+          @click="closeShareAndNavigate"
+          class="text-gray-500 text-sm hover:text-gray-700"
+        >
+          Maybe later
+        </button>
       </div>
     </div>
 

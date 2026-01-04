@@ -13,6 +13,9 @@ RewriteBase /
 RewriteCond %{REQUEST_URI} ^/api/
 RewriteRule ^api/(.*)$ api/index.php [L,QSA]
 
+# Handle plant share pages with OG meta tags for social crawlers
+RewriteRule ^plant/(\d+)$ api/share.php [L,QSA]
+
 # Serve static files directly if they exist
 RewriteCond %{REQUEST_FILENAME} -f
 RewriteRule ^ - [L]

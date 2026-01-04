@@ -96,6 +96,39 @@ class PlantController
     }
 
     /**
+     * Get public plant view (no auth required)
+     * GET /plants/share/{id}
+     */
+    public function publicShare(array $params, array $body, ?int $userId): array
+    {
+        $plantId = $params['id'];
+
+        $stmt = db()->prepare('
+            SELECT p.id, p.name, p.species, p.created_at,
+                   u.email as owner_email,
+                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as photo
+            FROM plants p
+            JOIN users u ON p.user_id = u.id
+            WHERE p.id = ? AND p.archived_at IS NULL
+        ');
+        $stmt->execute([$plantId]);
+        $plant = $stmt->fetch();
+
+        if (!$plant) {
+            return ['status' => 404, 'data' => ['error' => 'Plant not found']];
+        }
+
+        // Get owner's first name from email (before @)
+        $ownerName = explode('@', $plant['owner_email'])[0];
+        unset($plant['owner_email']); // Don't expose full email
+
+        return [
+            'plant' => $plant,
+            'owner_name' => ucfirst($ownerName)
+        ];
+    }
+
+    /**
      * Create new plant
      */
     public function store(array $params, array $body, ?int $userId): array
