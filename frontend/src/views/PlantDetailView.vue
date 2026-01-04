@@ -218,8 +218,8 @@ async function updateHealthStatus(status) {
         <div class="flex-1 min-w-0">
           <h1 class="text-xl font-bold text-gray-900 truncate">{{ plant.name }}</h1>
           <a
-            v-if="plant.species && plant.wikipedia_url"
-            :href="plant.wikipedia_url"
+            v-if="plant.species"
+            :href="`https://www.google.com/search?q=${encodeURIComponent(plant.species + ' plant')}`"
             target="_blank"
             rel="noopener"
             class="text-plant-600 text-sm hover:underline inline-flex items-center gap-1"
@@ -229,7 +229,6 @@ async function updateHealthStatus(status) {
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
             </svg>
           </a>
-          <p v-else-if="plant.species" class="text-gray-500 text-sm">{{ plant.species }}</p>
         </div>
         <!-- Chat button -->
         <button @click="showChat = true" class="btn-ghost p-2">

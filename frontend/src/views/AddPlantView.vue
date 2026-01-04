@@ -28,6 +28,8 @@ const showSpeciesPicker = ref(false)
 const speciesCandidates = ref([])
 const selectedSpecies = ref(null)
 const pendingPlantId = ref(null)
+const customSpecies = ref('')
+const confirmingSpecies = ref(false)
 
 const form = ref({
   name: '',
@@ -240,18 +242,27 @@ async function handleSubmit() {
 }
 
 async function confirmSpecies() {
-  if (!selectedSpecies.value || !pendingPlantId.value) return
+  const speciesName = customSpecies.value.trim() || selectedSpecies.value
+  if (!speciesName || !pendingPlantId.value) return
 
+  confirmingSpecies.value = true
   try {
     await api.post(`/plants/${pendingPlantId.value}/confirm-species`, {
-      species: selectedSpecies.value
+      species: speciesName
     })
     window.$toast?.success('Species confirmed!')
     showSpeciesPicker.value = false
     router.replace(`/plants/${pendingPlantId.value}`)
   } catch (e) {
     window.$toast?.error('Failed to confirm species')
+  } finally {
+    confirmingSpecies.value = false
   }
+}
+
+function selectSpeciesCandidate(species) {
+  selectedSpecies.value = species
+  customSpecies.value = '' // Clear custom input when selecting a candidate
 }
 
 function skipSpeciesSelection() {
@@ -627,48 +638,82 @@ function skipSpeciesSelection() {
       <div class="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-auto">
         <div class="p-4 border-b">
           <h2 class="text-lg font-semibold text-gray-900">Confirm Plant Species</h2>
-          <p class="text-sm text-gray-500 mt-1">AI detected multiple possible species. Which one is correct?</p>
+          <p class="text-sm text-gray-500 mt-1">AI detected possible species. Select one or enter your own.</p>
         </div>
 
         <div class="p-4 space-y-2">
-          <button
+          <div
             v-for="candidate in speciesCandidates"
             :key="candidate.species"
-            @click="selectedSpecies = candidate.species"
-            class="w-full p-3 rounded-xl border-2 text-left transition-all flex items-center justify-between"
-            :class="selectedSpecies === candidate.species
+            class="p-3 rounded-xl border-2 transition-all"
+            :class="selectedSpecies === candidate.species && !customSpecies
               ? 'border-plant-500 bg-plant-50'
-              : 'border-gray-200 hover:border-gray-300'"
+              : 'border-gray-200'"
           >
-            <div>
-              <span class="font-medium text-gray-900">{{ candidate.species }}</span>
-              <span class="text-xs text-gray-500 ml-2">{{ Math.round(candidate.confidence * 100) }}% confidence</span>
-            </div>
-            <div
-              v-if="selectedSpecies === candidate.species"
-              class="w-5 h-5 bg-plant-500 rounded-full flex items-center justify-center"
+            <button
+              @click="selectSpeciesCandidate(candidate.species)"
+              class="w-full text-left flex items-center justify-between"
             >
-              <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+              <div>
+                <span class="font-medium text-gray-900">{{ candidate.species }}</span>
+                <span class="text-xs text-gray-500 ml-2">{{ Math.round(candidate.confidence * 100) }}%</span>
+              </div>
+              <div
+                v-if="selectedSpecies === candidate.species && !customSpecies"
+                class="w-5 h-5 bg-plant-500 rounded-full flex items-center justify-center"
+              >
+                <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            </button>
+            <!-- Google Images link -->
+            <a
+              :href="`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(candidate.species + ' plant')}`"
+              target="_blank"
+              rel="noopener"
+              class="inline-flex items-center gap-1 text-xs text-plant-600 hover:text-plant-700 mt-1"
+              @click.stop
+            >
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-            </div>
-          </button>
+              View images to confirm
+            </a>
+          </div>
+
+          <!-- Custom species input -->
+          <div class="pt-2 border-t mt-3">
+            <label class="block text-sm text-gray-600 mb-1">Or enter a different species:</label>
+            <input
+              v-model="customSpecies"
+              type="text"
+              class="input text-sm"
+              placeholder="Type species name..."
+              @input="selectedSpecies = null"
+            >
+          </div>
         </div>
 
         <div class="p-4 border-t flex gap-2">
           <button
             @click="skipSpeciesSelection"
             class="btn-secondary flex-1"
+            :disabled="confirmingSpecies"
           >
             Skip
           </button>
           <button
             @click="confirmSpecies"
-            :disabled="!selectedSpecies"
+            :disabled="(!selectedSpecies && !customSpecies.trim()) || confirmingSpecies"
             class="btn-primary flex-1"
-            :class="{ 'opacity-50 cursor-not-allowed': !selectedSpecies }"
+            :class="{ 'opacity-50 cursor-not-allowed': (!selectedSpecies && !customSpecies.trim()) || confirmingSpecies }"
           >
-            Confirm
+            <span v-if="confirmingSpecies" class="flex items-center justify-center gap-2">
+              <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              Confirming...
+            </span>
+            <span v-else>Confirm</span>
           </button>
         </div>
       </div>
