@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useTasksStore } from '@/stores/tasks'
 import { useApi } from '@/composables/useApi'
+import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
 
 const props = defineProps({
   task: { type: Object, required: true },
@@ -20,7 +21,24 @@ const recError = ref(null)
 const showNotesInput = ref(false)
 const notes = ref('')
 
-const emit = defineEmits(['completed'])
+// Skip modal state
+const showSkipModal = ref(false)
+const skipReason = ref('')
+const customSkipReason = ref('')
+const skipping = ref(false)
+const adjustingSchedule = ref(false)
+const scheduleAdjustment = ref(null)
+
+const skipReasons = [
+  { value: 'still_moist', label: 'Soil is still moist', icon: '💧' },
+  { value: 'plant_away', label: 'Plant is away/outdoors', icon: '🌳' },
+  { value: 'recently_done', label: 'Already did this recently', icon: '✅' },
+  { value: 'plant_stressed', label: 'Plant seems stressed', icon: '😟' },
+  { value: 'weather', label: 'Weather conditions', icon: '🌧️' },
+  { value: 'other', label: 'Other reason', icon: '📝' }
+]
+
+const emit = defineEmits(['completed', 'skipped'])
 
 const taskIcons = {
   water: '💧',
@@ -81,6 +99,82 @@ function cancelNotes() {
   showNotesInput.value = false
   notes.value = ''
 }
+
+function openSkipModal() {
+  showSkipModal.value = true
+  skipReason.value = ''
+  customSkipReason.value = ''
+  scheduleAdjustment.value = null
+}
+
+function closeSkipModal() {
+  showSkipModal.value = false
+  skipReason.value = ''
+  customSkipReason.value = ''
+  scheduleAdjustment.value = null
+}
+
+function getSkipReasonText() {
+  if (skipReason.value === 'other') {
+    return customSkipReason.value
+  }
+  const reason = skipReasons.find(r => r.value === skipReason.value)
+  return reason ? reason.label : skipReason.value
+}
+
+async function skipWithReason() {
+  if (!skipReason.value) return
+  if (skipReason.value === 'other' && !customSkipReason.value.trim()) return
+
+  skipping.value = true
+  try {
+    await tasks.skipTask(props.task.id, getSkipReasonText())
+    window.$toast?.success('Task skipped')
+    closeSkipModal()
+    emit('skipped', props.task)
+  } catch (error) {
+    window.$toast?.error(error.message)
+  } finally {
+    skipping.value = false
+  }
+}
+
+async function getAIScheduleAdjustment() {
+  if (!skipReason.value) return
+
+  adjustingSchedule.value = true
+  try {
+    const response = await api.post(`/tasks/${props.task.id}/adjust-schedule`, {
+      reason: getSkipReasonText()
+    })
+    scheduleAdjustment.value = response
+  } catch (error) {
+    window.$toast?.error(error.message || 'Could not get schedule suggestion')
+  } finally {
+    adjustingSchedule.value = false
+  }
+}
+
+async function applyScheduleAdjustment() {
+  if (!scheduleAdjustment.value) return
+
+  skipping.value = true
+  try {
+    await api.post(`/tasks/${props.task.id}/apply-adjustment`, {
+      reason: getSkipReasonText(),
+      adjustment: scheduleAdjustment.value.adjustment
+    })
+    // Remove task from list since it was adjusted
+    await tasks.fetchTodayTasks()
+    window.$toast?.success('Schedule updated!')
+    closeSkipModal()
+    emit('skipped', props.task)
+  } catch (error) {
+    window.$toast?.error(error.message)
+  } finally {
+    skipping.value = false
+  }
+}
 </script>
 
 <template>
@@ -124,17 +218,31 @@ function cancelNotes() {
           {{ task.instructions }}
         </p>
 
-        <!-- Expand/collapse button for recommendations -->
-        <button
-          v-if="showRecommendations && !completed"
-          @click="toggleExpand"
-          class="mt-2 text-xs text-plant-600 hover:text-plant-700 font-medium flex items-center gap-1"
-        >
-          <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': expanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-          </svg>
-          {{ expanded ? 'Hide' : 'How to do this' }}
-        </button>
+        <!-- Action buttons -->
+        <div v-if="!completed" class="mt-2 flex items-center gap-3">
+          <!-- Expand/collapse button for recommendations -->
+          <button
+            v-if="showRecommendations"
+            @click="toggleExpand"
+            class="text-xs text-plant-600 hover:text-plant-700 font-medium flex items-center gap-1"
+          >
+            <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': expanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+            {{ expanded ? 'Hide' : 'How to' }}
+          </button>
+
+          <!-- Skip button -->
+          <button
+            @click="openSkipModal"
+            class="text-xs text-gray-500 hover:text-gray-700 font-medium flex items-center gap-1"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+            </svg>
+            Skip
+          </button>
+        </div>
       </div>
 
       <!-- Plant thumbnail -->
@@ -242,5 +350,135 @@ function cancelNotes() {
         </div>
       </div>
     </div>
+
+    <!-- Loading overlay for AI recommendations -->
+    <LoadingOverlay :visible="loadingRecs" :message="`Getting tips for ${plant?.name || task.plant_name}...`" />
+
+    <!-- Skip Modal -->
+    <Teleport to="body">
+      <div v-if="showSkipModal" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+        <!-- Backdrop -->
+        <div class="absolute inset-0 bg-black/50" @click="closeSkipModal"></div>
+
+        <!-- Modal content -->
+        <div class="relative bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[85vh] overflow-y-auto">
+          <div class="p-4 border-b sticky top-0 bg-white rounded-t-2xl">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold text-gray-900">Skip Task</h3>
+              <button @click="closeSkipModal" class="p-1 text-gray-400 hover:text-gray-600">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <p class="text-sm text-gray-500 mt-1">
+              {{ taskIcons[task.task_type] }} {{ task.task_type }} - {{ plant?.name || task.plant_name }}
+            </p>
+          </div>
+
+          <div class="p-4 space-y-4">
+            <!-- Reason selection -->
+            <div>
+              <p class="text-sm font-medium text-gray-700 mb-2">Why are you skipping?</p>
+              <div class="space-y-2">
+                <label
+                  v-for="reason in skipReasons"
+                  :key="reason.value"
+                  class="flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all"
+                  :class="skipReason === reason.value
+                    ? 'border-plant-500 bg-plant-50'
+                    : 'border-gray-200 hover:border-gray-300'"
+                >
+                  <input
+                    type="radio"
+                    v-model="skipReason"
+                    :value="reason.value"
+                    class="sr-only"
+                  >
+                  <span class="text-lg">{{ reason.icon }}</span>
+                  <span class="text-sm text-gray-700">{{ reason.label }}</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Custom reason input -->
+            <div v-if="skipReason === 'other'">
+              <textarea
+                v-model="customSkipReason"
+                rows="2"
+                class="input text-sm"
+                placeholder="Describe why you're skipping..."
+              ></textarea>
+            </div>
+
+            <!-- AI Schedule Adjustment -->
+            <div v-if="skipReason && !scheduleAdjustment" class="pt-2 border-t">
+              <button
+                @click="getAIScheduleAdjustment"
+                :disabled="adjustingSchedule || (skipReason === 'other' && !customSkipReason.trim())"
+                class="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl border-2 border-dashed border-plant-300 text-plant-600 hover:bg-plant-50 transition-colors disabled:opacity-50"
+              >
+                <svg v-if="adjustingSchedule" class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+                <span class="text-sm font-medium">
+                  {{ adjustingSchedule ? 'Analyzing...' : 'Ask AI to adjust schedule' }}
+                </span>
+              </button>
+              <p class="text-xs text-gray-500 text-center mt-2">
+                AI will suggest a new schedule based on your feedback
+              </p>
+            </div>
+
+            <!-- AI Suggestion -->
+            <div v-if="scheduleAdjustment" class="bg-plant-50 rounded-xl p-4 border border-plant-200">
+              <div class="flex items-start gap-3">
+                <div class="w-8 h-8 bg-plant-200 rounded-full flex items-center justify-center flex-shrink-0">
+                  <svg class="w-4 h-4 text-plant-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                </div>
+                <div class="flex-1">
+                  <p class="font-medium text-plant-800 text-sm">AI Suggestion</p>
+                  <p class="text-sm text-plant-700 mt-1">{{ scheduleAdjustment.suggestion }}</p>
+                  <p v-if="scheduleAdjustment.new_interval" class="text-xs text-plant-600 mt-2">
+                    New schedule: Every {{ scheduleAdjustment.new_interval }} days
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex gap-3 pt-2">
+              <button
+                @click="skipWithReason"
+                :disabled="!skipReason || skipping || (skipReason === 'other' && !customSkipReason.trim())"
+                class="flex-1 btn-secondary"
+              >
+                <span v-if="skipping" class="flex items-center justify-center gap-2">
+                  <div class="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                </span>
+                <span v-else>Skip Only</span>
+              </button>
+              <button
+                v-if="scheduleAdjustment"
+                @click="applyScheduleAdjustment"
+                :disabled="skipping"
+                class="flex-1 btn-primary"
+              >
+                <span v-if="skipping" class="flex items-center justify-center gap-2">
+                  <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                </span>
+                <span v-else>Skip & Update Schedule</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

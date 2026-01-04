@@ -59,6 +59,11 @@ export const usePlantsStore = defineStore('plants', () => {
     return response.photos
   }
 
+  async function regenerateCarePlan(plantId) {
+    const response = await api.post(`/plants/${plantId}/care-plan/regenerate`)
+    return response
+  }
+
   function getPlantById(id) {
     return plants.value.find(p => p.id === parseInt(id))
   }
@@ -75,6 +80,7 @@ export const usePlantsStore = defineStore('plants', () => {
     deletePlant,
     uploadPhoto,
     getPhotos,
-    getPlantById
+    getPlantById,
+    regenerateCarePlan
   }
 })

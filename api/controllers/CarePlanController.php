@@ -183,9 +183,17 @@ class CarePlanController
         ]);
         $carePlanId = db()->lastInsertId();
 
-        // Create tasks from AI plan
+        // Get user's enabled task types
+        $enabledTaskTypes = $this->getEnabledTaskTypes($plant['user_id']);
+
+        // Create tasks from AI plan (filter by enabled types)
         if (!empty($aiPlan['tasks'])) {
             foreach ($aiPlan['tasks'] as $task) {
+                // Skip if task type is disabled
+                if (!in_array($task['type'], $enabledTaskTypes)) {
+                    continue;
+                }
+
                 $stmt = db()->prepare('
                     INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, instructions, priority)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -207,6 +215,23 @@ class CarePlanController
         $stmt->execute([$carePlanId]);
 
         return $stmt->fetch();
+    }
+
+    /**
+     * Get list of enabled task types for a user
+     */
+    private function getEnabledTaskTypes(int $userId): array
+    {
+        // All default task types
+        $allTypes = ['water', 'fertilize', 'mist', 'rotate', 'trim', 'repot', 'check', 'change_water', 'check_roots', 'pot_up'];
+
+        // Get user's disabled types
+        $stmt = db()->prepare('SELECT task_type FROM task_type_settings WHERE user_id = ? AND enabled = 0');
+        $stmt->execute([$userId]);
+        $disabledTypes = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        // Return types that are not disabled
+        return array_diff($allTypes, $disabledTypes);
     }
 
     /**

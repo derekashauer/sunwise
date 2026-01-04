@@ -51,6 +51,18 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/graveyard',
+    name: 'graveyard',
+    component: () => import('@/views/GraveyardView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/pots',
+    name: 'pots',
+    component: () => import('@/views/PotsView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue'),

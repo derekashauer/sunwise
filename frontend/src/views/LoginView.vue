@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { APP_VERSION } from '@/config'
 
 const router = useRouter()
 const route = useRoute()
@@ -129,6 +130,9 @@ async function handleSubmit() {
           Sign up
         </router-link>
       </p>
+
+      <!-- Version number -->
+      <p class="mt-8 text-center text-xs text-gray-400">v{{ APP_VERSION }}</p>
     </div>
   </div>
 </template>

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useApi } from '@/composables/useApi'
 import ChatMessage from './ChatMessage.vue'
 import ActionCard from './ActionCard.vue'
+import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
 
 const props = defineProps({
   plant: { type: Object, required: true },
@@ -289,5 +290,8 @@ const canUseProvider = computed(() => {
         </p>
       </div>
     </div>
+
+    <!-- Loading overlay for AI response -->
+    <LoadingOverlay :visible="loading" message="Thinking about your plant..." />
   </div>
 </template>

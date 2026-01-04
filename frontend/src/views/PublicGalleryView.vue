@@ -38,16 +38,6 @@ function getPlantImage(plant) {
   }
   return '/icons/plant-placeholder.svg'
 }
-
-function getHealthEmoji(status) {
-  const emojis = {
-    thriving: '1f31f',
-    healthy: '2705',
-    struggling: '26a0-fe0f',
-    critical: '1f6a8'
-  }
-  return emojis[status] || '1f331'
-}
 </script>
 
 <template>
@@ -103,13 +93,6 @@ function getHealthEmoji(status) {
           <div class="p-3">
             <h3 class="font-semibold text-gray-900 truncate">{{ plant.name }}</h3>
             <p v-if="plant.species" class="text-sm text-gray-500 truncate">{{ plant.species }}</p>
-            <div v-if="plant.health_status" class="mt-2">
-              <img
-                :src="`https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/${getHealthEmoji(plant.health_status)}.svg`"
-                class="w-4 h-4 inline"
-                alt=""
-              >
-            </div>
           </div>
         </div>
       </div>

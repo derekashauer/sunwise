@@ -6,7 +6,7 @@
 class PlantController
 {
     /**
-     * List all plants for user
+     * List all active plants for user (excludes archived)
      */
     public function index(array $params, array $body, ?int $userId): array
     {
@@ -16,13 +16,83 @@ class PlantController
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as thumbnail
             FROM plants p
             LEFT JOIN locations l ON p.location_id = l.id
-            WHERE p.user_id = ?
+            WHERE p.user_id = ? AND p.archived_at IS NULL
             ORDER BY p.created_at DESC
         ');
         $stmt->execute([$userId]);
         $plants = $stmt->fetchAll();
 
         return ['plants' => $plants];
+    }
+
+    /**
+     * List archived plants (graveyard)
+     */
+    public function archived(array $params, array $body, ?int $userId): array
+    {
+        $stmt = db()->prepare('
+            SELECT p.*,
+                   l.name as location_name,
+                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as thumbnail
+            FROM plants p
+            LEFT JOIN locations l ON p.location_id = l.id
+            WHERE p.user_id = ? AND p.archived_at IS NOT NULL
+            ORDER BY p.archived_at DESC
+        ');
+        $stmt->execute([$userId]);
+        $plants = $stmt->fetchAll();
+
+        return ['plants' => $plants];
+    }
+
+    /**
+     * Archive a plant (send to graveyard)
+     */
+    public function archive(array $params, array $body, ?int $userId): array
+    {
+        $plantId = $params['id'];
+
+        // Verify ownership
+        $stmt = db()->prepare('SELECT id, archived_at FROM plants WHERE id = ? AND user_id = ?');
+        $stmt->execute([$plantId, $userId]);
+        $plant = $stmt->fetch();
+
+        if (!$plant) {
+            return ['status' => 404, 'data' => ['error' => 'Plant not found']];
+        }
+
+        if ($plant['archived_at']) {
+            return ['status' => 400, 'data' => ['error' => 'Plant is already archived']];
+        }
+
+        $deathReason = $body['death_reason'] ?? null;
+
+        // Archive the plant
+        $stmt = db()->prepare('
+            UPDATE plants
+            SET archived_at = datetime("now"), death_reason = ?
+            WHERE id = ?
+        ');
+        $stmt->execute([$deathReason, $plantId]);
+
+        // Deactivate care plan
+        $stmt = db()->prepare('UPDATE care_plans SET active = 0 WHERE plant_id = ?');
+        $stmt->execute([$plantId]);
+
+        // Delete pending tasks
+        $stmt = db()->prepare('
+            DELETE FROM tasks
+            WHERE plant_id = ? AND completed_at IS NULL AND skipped_at IS NULL
+        ');
+        $stmt->execute([$plantId]);
+
+        // Remove any sitter access for this plant
+        $stmt = db()->prepare('
+            DELETE FROM sitter_plants WHERE plant_id = ?
+        ');
+        $stmt->execute([$plantId]);
+
+        return ['message' => 'Plant archived', 'archived_at' => date('Y-m-d H:i:s')];
     }
 
     /**
@@ -76,8 +146,24 @@ class PlantController
             $stmt->execute([$plantId, $imageFilename]);
             $photoId = db()->lastInsertId();
 
-            // Trigger AI identification in background
-            $this->triggerAIIdentification($plantId, $photoId, $imageFilename);
+            // Only trigger AI identification if species wasn't manually entered
+            $speciesProvided = !empty(trim($body['species'] ?? ''));
+            if ($speciesProvided) {
+                // Species was manually entered - mark as confirmed and generate care plan
+                $stmt = db()->prepare('UPDATE plants SET species_confirmed = 1 WHERE id = ?');
+                $stmt->execute([$plantId]);
+
+                // Generate care plan for the manually entered species
+                try {
+                    $carePlanController = new CarePlanController();
+                    $carePlanController->generateCarePlan($plantId);
+                } catch (Exception $e) {
+                    error_log('Failed to generate care plan: ' . $e->getMessage());
+                }
+            } else {
+                // No species entered - trigger AI identification
+                $this->triggerAIIdentification($plantId, $photoId, $imageFilename);
+            }
         }
 
         // Get the created plant

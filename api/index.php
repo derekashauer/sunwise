@@ -80,11 +80,13 @@ $routes = [
 
     // Plant routes
     'GET /plants' => ['PlantController', 'index', true],
+    'GET /plants/archived' => ['PlantController', 'archived', true],
     'POST /plants' => ['PlantController', 'store', true],
     'GET /plants/generate-name' => ['PlantController', 'generateName', true],
     'GET /plants/{id}' => ['PlantController', 'show', true],
     'PUT /plants/{id}' => ['PlantController', 'update', true],
     'DELETE /plants/{id}' => ['PlantController', 'destroy', true],
+    'POST /plants/{id}/archive' => ['PlantController', 'archive', true],
     'POST /plants/{id}/photo' => ['PhotoController', 'store', true],
     'GET /plants/{id}/photos' => ['PhotoController', 'index', true],
     'GET /plants/{id}/care-plan' => ['CarePlanController', 'show', true],
@@ -131,6 +133,11 @@ $routes = [
     'DELETE /settings/ai/claude-key' => ['SettingsController', 'removeClaudeKey', true],
     'DELETE /settings/ai/openai-key' => ['SettingsController', 'removeOpenAIKey', true],
     'PUT /settings/ai/default-provider' => ['SettingsController', 'setDefaultProvider', true],
+    'PUT /settings/ai/model' => ['SettingsController', 'setAiModel', true],
+
+    // Task type settings routes
+    'GET /settings/task-types' => ['SettingsController', 'getTaskTypes', true],
+    'PUT /settings/task-types' => ['SettingsController', 'updateTaskTypes', true],
 
     // Notification settings routes
     'GET /settings/notifications' => ['SettingsController', 'getNotificationSettings', true],
@@ -143,6 +150,16 @@ $routes = [
 
     // Public gallery view (no auth)
     'GET /gallery/{token}' => ['GalleryController', 'show'],
+
+    // Pots inventory routes
+    'GET /pots' => ['PotController', 'index', true],
+    'GET /pots/available' => ['PotController', 'available', true],
+    'POST /pots' => ['PotController', 'store', true],
+    'GET /pots/{id}' => ['PotController', 'show', true],
+    'PUT /pots/{id}' => ['PotController', 'update', true],
+    'DELETE /pots/{id}' => ['PotController', 'destroy', true],
+    'POST /pots/{id}/photo' => ['PotController', 'uploadPhoto', true],
+    'POST /pots/{id}/assign' => ['PotController', 'assign', true],
 
     // Species confirmation
     'POST /plants/{id}/confirm-species' => ['PlantController', 'confirmSpecies', true],

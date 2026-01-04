@@ -10,10 +10,20 @@ class OpenAIService implements AIServiceInterface
     private string $model;
     private string $apiUrl = 'https://api.openai.com/v1/chat/completions';
 
-    public function __construct(string $apiKey)
+    public function __construct(string $apiKey, ?string $model = null)
     {
         $this->apiKey = $apiKey;
-        $this->model = defined('OPENAI_MODEL') ? OPENAI_MODEL : 'gpt-5.2';
+        $this->model = $model ?? (defined('OPENAI_MODEL') ? OPENAI_MODEL : 'gpt-4o');
+    }
+
+    public function setModel(string $model): void
+    {
+        $this->model = $model;
+    }
+
+    public function getModel(): string
+    {
+        return $this->model;
     }
 
     public function getProviderName(): string
@@ -272,45 +282,83 @@ INST;
 
     private function buildChatSystemPrompt(array $plant, array $context): string
     {
-        $prompt = "You are a knowledgeable and friendly plant care expert. You're helping the user care for their plant.\n\n";
+        $species = $plant['species'] ?? 'Unknown species';
+        $plantName = $plant['name'] ?? 'this plant';
 
-        $prompt .= "Current plant information:\n";
-        $prompt .= "- Name: " . ($plant['name'] ?? 'Unknown') . "\n";
-        $prompt .= "- Species: " . ($plant['species'] ?? 'Unknown') . "\n";
+        $prompt = "You are a knowledgeable and friendly plant care expert. You are chatting with a user about their specific plant.\n\n";
+
+        $prompt .= "=== IMPORTANT: PLANT-SPECIFIC CONTEXT ===\n";
+        $prompt .= "You MUST tailor ALL advice specifically for this plant. Never give generic houseplant advice.\n\n";
+
+        $prompt .= "## THIS PLANT'S DETAILS:\n";
+        $prompt .= "**Plant Name**: {$plantName}\n";
+        $prompt .= "**Species**: {$species}\n";
 
         if (!empty($plant['species_confidence'])) {
-            $prompt .= "- Species identification confidence: " . round($plant['species_confidence'] * 100) . "%\n";
+            $confidence = round($plant['species_confidence'] * 100);
+            $prompt .= "**Species ID Confidence**: {$confidence}%\n";
         }
 
-        $prompt .= "- Location: " . ($plant['location_name'] ?? $plant['location'] ?? 'Not specified') . "\n";
-        $prompt .= "- Pot size: " . ($plant['pot_size'] ?? 'Not specified') . "\n";
-        $prompt .= "- Soil type: " . ($plant['soil_type'] ?? 'Not specified') . "\n";
-        $prompt .= "- Light condition: " . ($plant['light_condition'] ?? 'Not specified') . "\n";
-        $prompt .= "- Health status: " . ($plant['health_status'] ?? 'Unknown') . "\n";
+        $prompt .= "**Location**: " . ($plant['location_name'] ?? $plant['location'] ?? 'Not specified') . "\n";
+        $prompt .= "**Pot Size**: " . ($plant['pot_size'] ?? 'Not specified') . "\n";
+        $prompt .= "**Soil Type**: " . ($plant['soil_type'] ?? 'Not specified') . "\n";
+        $prompt .= "**Light Condition**: " . ($plant['light_condition'] ?? 'Not specified') . "\n";
+        $prompt .= "**Current Health**: " . ($plant['health_status'] ?? 'Unknown') . "\n";
+
+        // Propagation info
+        if (!empty($plant['is_propagation'])) {
+            $prompt .= "\n⚠️ **PROPAGATION STATUS**: This is a CUTTING/PROPAGATION, NOT a mature plant!\n";
+            if (!empty($plant['propagation_date'])) {
+                $prompt .= "**Propagation Started**: " . $plant['propagation_date'] . "\n";
+            }
+            if ($plant['soil_type'] === 'water') {
+                $prompt .= "**Medium**: Water propagation\n";
+            }
+        }
+
+        // Grow light info
+        if (!empty($plant['has_grow_light'])) {
+            $hours = $plant['grow_light_hours'] ?? 'unspecified';
+            $prompt .= "**Grow Light**: Yes, {$hours} hours/day\n";
+        }
 
         if (!empty($plant['notes'])) {
-            $prompt .= "- User notes: " . $plant['notes'] . "\n";
+            $prompt .= "**Owner's Notes**: " . $plant['notes'] . "\n";
         }
 
         // Add care log if available
         if (!empty($context['care_log'])) {
-            $prompt .= "\nRecent care history:\n";
+            $prompt .= "\n## RECENT CARE HISTORY:\n";
             foreach (array_slice($context['care_log'], 0, 5) as $log) {
-                $prompt .= "- {$log['action']} on {$log['performed_at']}\n";
+                $date = date('M j', strtotime($log['performed_at']));
+                $prompt .= "- **{$date}**: {$log['action']}";
+                if (!empty($log['notes'])) {
+                    $prompt .= " - {$log['notes']}";
+                }
+                $prompt .= "\n";
             }
         }
 
         // Add upcoming tasks if available
         if (!empty($context['tasks'])) {
-            $prompt .= "\nUpcoming care tasks:\n";
+            $prompt .= "\n## SCHEDULED CARE TASKS:\n";
             foreach (array_slice($context['tasks'], 0, 5) as $task) {
-                $prompt .= "- {$task['task_type']} due on {$task['due_date']}\n";
+                $date = date('M j', strtotime($task['due_date']));
+                $prompt .= "- **{$date}**: {$task['task_type']}";
+                if (!empty($task['instructions'])) {
+                    $prompt .= " - {$task['instructions']}";
+                }
+                $prompt .= "\n";
             }
         }
 
-        $prompt .= "\nAlways consider the specific needs of this species when giving advice.";
-        $prompt .= " If the user mentions issues like yellowing leaves, drooping, or pests, provide specific diagnosis and treatment recommendations.";
-        $prompt .= " If you think the species identification might be wrong based on the conversation, suggest correcting it.";
+        $prompt .= "\n=== RESPONSE GUIDELINES ===\n";
+        $prompt .= "1. **ALWAYS reference {$species} specifically** - mention its specific needs, tolerances, and characteristics.\n";
+        $prompt .= "2. Consider this plant's current conditions (pot size: {$plant['pot_size']}, soil: {$plant['soil_type']}, light: {$plant['light_condition']}).\n";
+        $prompt .= "3. If discussing watering, fertilizing, or care schedules, tailor advice for {$species}.\n";
+        $prompt .= "4. If the user describes symptoms, diagnose based on {$species}-specific issues.\n";
+        $prompt .= "5. Reference the care history above when relevant.\n";
+        $prompt .= "6. If you believe the species identification is wrong, suggest correcting it.\n";
 
         return $prompt;
     }

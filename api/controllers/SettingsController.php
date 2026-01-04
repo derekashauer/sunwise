@@ -6,6 +6,19 @@
 
 class SettingsController
 {
+    // Available AI models
+    private const CLAUDE_MODELS = [
+        'claude-opus-4-5-20251101' => 'Claude Opus 4.5 (Most capable)',
+        'claude-sonnet-4-20250514' => 'Claude Sonnet 4 (Balanced)',
+        'claude-3-5-haiku-20241022' => 'Claude Haiku 3.5 (Fast & cheap)'
+    ];
+
+    private const OPENAI_MODELS = [
+        'gpt-4o' => 'GPT-4o (Balanced)',
+        'gpt-4o-mini' => 'GPT-4o Mini (Fast & cheap)',
+        'gpt-4-turbo' => 'GPT-4 Turbo (Previous gen)'
+    ];
+
     /**
      * Get AI settings for user
      * GET /settings/ai
@@ -23,7 +36,13 @@ class SettingsController
                 'has_claude_key' => false,
                 'has_openai_key' => false,
                 'claude_key_added_at' => null,
-                'openai_key_added_at' => null
+                'openai_key_added_at' => null,
+                'claude_model' => 'claude-sonnet-4-20250514',
+                'openai_model' => 'gpt-4o',
+                'available_models' => [
+                    'claude' => self::CLAUDE_MODELS,
+                    'openai' => self::OPENAI_MODELS
+                ]
             ];
         }
 
@@ -32,7 +51,13 @@ class SettingsController
             'has_claude_key' => !empty($settings['claude_api_key_encrypted']),
             'has_openai_key' => !empty($settings['openai_api_key_encrypted']),
             'claude_key_added_at' => $settings['claude_key_added_at'],
-            'openai_key_added_at' => $settings['openai_key_added_at']
+            'openai_key_added_at' => $settings['openai_key_added_at'],
+            'claude_model' => $settings['claude_model'] ?? 'claude-sonnet-4-20250514',
+            'openai_model' => $settings['openai_model'] ?? 'gpt-4o',
+            'available_models' => [
+                'claude' => self::CLAUDE_MODELS,
+                'openai' => self::OPENAI_MODELS
+            ]
         ];
     }
 
@@ -380,5 +405,115 @@ class SettingsController
 
         // Return updated settings
         return $this->getPublicGallerySettings($params, $body, $userId);
+    }
+
+    /**
+     * Set AI model for a provider
+     * PUT /settings/ai/model
+     */
+    public function setAiModel(array $params, array $body, ?int $userId): array
+    {
+        $provider = $body['provider'] ?? '';
+        $model = $body['model'] ?? '';
+
+        if (!in_array($provider, ['claude', 'openai'])) {
+            return ['status' => 400, 'data' => ['error' => 'Provider must be "claude" or "openai"']];
+        }
+
+        // Validate model is in allowed list
+        $allowedModels = $provider === 'claude' ? self::CLAUDE_MODELS : self::OPENAI_MODELS;
+        if (!isset($allowedModels[$model])) {
+            return ['status' => 400, 'data' => ['error' => 'Invalid model for ' . $provider]];
+        }
+
+        $column = $provider === 'claude' ? 'claude_model' : 'openai_model';
+
+        // Upsert settings
+        $stmt = db()->prepare("
+            INSERT INTO ai_settings (user_id, {$column})
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                {$column} = excluded.{$column},
+                updated_at = datetime(\"now\")
+        ");
+        $stmt->execute([$userId, $model]);
+
+        return [
+            'success' => true,
+            'provider' => $provider,
+            'model' => $model,
+            'model_name' => $allowedModels[$model]
+        ];
+    }
+
+    // Default task types with their labels
+    private const TASK_TYPES = [
+        'water' => 'Watering',
+        'fertilize' => 'Fertilizing',
+        'mist' => 'Misting',
+        'rotate' => 'Rotating',
+        'trim' => 'Trimming/Pruning',
+        'repot' => 'Repotting',
+        'check' => 'Health Check',
+        'change_water' => 'Change Water (Propagation)',
+        'check_roots' => 'Check Roots (Propagation)',
+        'pot_up' => 'Pot Up (Propagation)'
+    ];
+
+    /**
+     * Get task type settings
+     * GET /settings/task-types
+     */
+    public function getTaskTypes(array $params, array $body, ?int $userId): array
+    {
+        // Get user's custom settings
+        $stmt = db()->prepare('SELECT task_type, enabled FROM task_type_settings WHERE user_id = ?');
+        $stmt->execute([$userId]);
+        $userSettings = [];
+        while ($row = $stmt->fetch()) {
+            $userSettings[$row['task_type']] = (bool)$row['enabled'];
+        }
+
+        // Build response with defaults (all enabled by default)
+        $taskTypes = [];
+        foreach (self::TASK_TYPES as $type => $label) {
+            $taskTypes[] = [
+                'type' => $type,
+                'label' => $label,
+                'enabled' => $userSettings[$type] ?? true
+            ];
+        }
+
+        return ['task_types' => $taskTypes];
+    }
+
+    /**
+     * Update task type settings
+     * PUT /settings/task-types
+     */
+    public function updateTaskTypes(array $params, array $body, ?int $userId): array
+    {
+        $settings = $body['settings'] ?? [];
+
+        if (empty($settings) || !is_array($settings)) {
+            return ['status' => 400, 'data' => ['error' => 'Settings array is required']];
+        }
+
+        foreach ($settings as $taskType => $enabled) {
+            // Validate task type
+            if (!isset(self::TASK_TYPES[$taskType])) {
+                continue;
+            }
+
+            // Upsert setting
+            $stmt = db()->prepare('
+                INSERT INTO task_type_settings (user_id, task_type, enabled)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id, task_type) DO UPDATE SET enabled = excluded.enabled
+            ');
+            $stmt->execute([$userId, $taskType, $enabled ? 1 : 0]);
+        }
+
+        return $this->getTaskTypes($params, $body, $userId);
     }
 }

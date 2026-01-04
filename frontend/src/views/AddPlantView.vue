@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { usePlantsStore } from '@/stores/plants'
 import { useLocationsStore } from '@/stores/locations'
 import { useApi } from '@/composables/useApi'
+import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -30,6 +31,10 @@ const selectedSpecies = ref(null)
 const pendingPlantId = ref(null)
 const customSpecies = ref('')
 const confirmingSpecies = ref(false)
+
+// Care plan regeneration prompt
+const showCarePlanPrompt = ref(false)
+const regeneratingCarePlan = ref(false)
 
 const form = ref({
   name: '',
@@ -62,6 +67,7 @@ const soilTypes = [
   { value: 'succulent', label: 'Succulent/Cactus Mix' },
   { value: 'orchid', label: 'Orchid Bark Mix' },
   { value: 'peat', label: 'Peat-Based Mix' },
+  { value: 'moss', label: 'Moss Ball' },
   { value: 'water', label: 'Water (Propagation)' },
   { value: 'rooting', label: 'Rooting Medium' },
   { value: 'custom', label: 'Custom Mix' }
@@ -73,6 +79,16 @@ const lightConditions = [
   { value: 'bright', label: 'Bright Indirect' },
   { value: 'direct', label: 'Direct Sunlight' }
 ]
+
+// Loading overlay state
+const isProcessing = computed(() => loading.value || identifying.value || confirmingSpecies.value || regeneratingCarePlan.value)
+const loadingMessage = computed(() => {
+  if (identifying.value) return 'Identifying your plant...'
+  if (confirmingSpecies.value) return 'Confirming species...'
+  if (regeneratingCarePlan.value) return 'Updating care plan...'
+  if (loading.value) return isEditing.value ? 'Saving changes...' : 'Adding your plant...'
+  return 'Loading...'
+})
 
 const healthStatuses = [
   { value: 'thriving', label: 'Thriving', emoji: '1f31f', desc: 'Growing vigorously' },
@@ -208,6 +224,10 @@ async function handleSubmit() {
     if (isEditing.value) {
       await plants.updatePlant(route.params.id, form.value)
       window.$toast?.success('Plant updated!')
+      // Show care plan regeneration prompt
+      showCarePlanPrompt.value = true
+      loading.value = false
+      return
     } else {
       const plant = await plants.createPlant(formData)
       window.$toast?.success('Plant added! AI is analyzing...')
@@ -270,6 +290,25 @@ function skipSpeciesSelection() {
   if (pendingPlantId.value) {
     router.replace(`/plants/${pendingPlantId.value}`)
   }
+}
+
+async function regenerateCarePlan() {
+  regeneratingCarePlan.value = true
+  try {
+    await plants.regenerateCarePlan(route.params.id)
+    window.$toast?.success('Care plan updated!')
+    showCarePlanPrompt.value = false
+    router.back()
+  } catch (e) {
+    window.$toast?.error('Failed to update care plan')
+  } finally {
+    regeneratingCarePlan.value = false
+  }
+}
+
+function skipCarePlanUpdate() {
+  showCarePlanPrompt.value = false
+  router.back()
 }
 </script>
 
@@ -718,5 +757,43 @@ function skipSpeciesSelection() {
         </div>
       </div>
     </div>
+
+    <!-- Care Plan Regeneration Prompt -->
+    <div v-if="showCarePlanPrompt" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div class="bg-white rounded-2xl max-w-sm w-full p-6">
+        <div class="w-12 h-12 mx-auto mb-4 bg-plant-100 rounded-full flex items-center justify-center">
+          <svg class="w-6 h-6 text-plant-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </div>
+        <h3 class="text-lg font-semibold text-center text-gray-900 mb-2">Update Care Plan?</h3>
+        <p class="text-gray-500 text-sm text-center mb-6">
+          You've made changes to this plant. Would you like AI to generate an updated care schedule based on the new information?
+        </p>
+        <div class="flex gap-3">
+          <button
+            @click="skipCarePlanUpdate"
+            :disabled="regeneratingCarePlan"
+            class="btn-secondary flex-1"
+          >
+            Keep Current
+          </button>
+          <button
+            @click="regenerateCarePlan"
+            :disabled="regeneratingCarePlan"
+            class="btn-primary flex-1"
+          >
+            <span v-if="regeneratingCarePlan" class="flex items-center justify-center gap-2">
+              <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              Updating...
+            </span>
+            <span v-else>Update Plan</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <LoadingOverlay :visible="isProcessing" :message="loadingMessage" />
   </div>
 </template>

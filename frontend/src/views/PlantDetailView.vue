@@ -39,6 +39,9 @@ const showShoppingModal = ref(false)
 const shoppingItem = ref('')
 const shoppingNotes = ref('')
 const savingShoppingItem = ref(false)
+const showArchiveModal = ref(false)
+const archiveReason = ref('')
+const archiving = ref(false)
 
 const healthColors = {
   thriving: 'bg-green-100 text-green-700',
@@ -141,6 +144,8 @@ async function deletePlant() {
 
 const upcomingTasks = computed(() => tasks.value.filter(t => !t.completed_at))
 
+const isArchived = computed(() => !!plant.value?.archived_at)
+
 const filteredCareLog = computed(() => {
   if (!careLogFilter.value) return careLog.value
   return careLog.value.filter(e => e.action === careLogFilter.value)
@@ -229,12 +234,29 @@ async function updateHealthStatus(status) {
 }
 
 // Loading overlay state
-const isProcessing = computed(() => uploadingPhoto.value || updatingHealth.value)
+const isProcessing = computed(() => uploadingPhoto.value || updatingHealth.value || archiving.value)
 const loadingMessage = computed(() => {
   if (uploadingPhoto.value) return 'Uploading photo...'
   if (updatingHealth.value) return 'Updating health status...'
+  if (archiving.value) return 'Archiving plant...'
   return 'Loading...'
 })
+
+async function archivePlant() {
+  archiving.value = true
+  try {
+    await api.post(`/plants/${route.params.id}/archive`, {
+      death_reason: archiveReason.value.trim() || null
+    })
+    window.$toast?.success(`${plant.value.name} has been moved to the graveyard`)
+    router.replace('/plants')
+  } catch (e) {
+    window.$toast?.error(e.message || 'Failed to archive plant')
+  } finally {
+    archiving.value = false
+    showArchiveModal.value = false
+  }
+}
 </script>
 
 <template>
@@ -267,14 +289,14 @@ const loadingMessage = computed(() => {
             </svg>
           </a>
         </div>
-        <!-- Chat button -->
-        <button @click="showChat = true" class="btn-ghost p-2">
+        <!-- Chat button (hide for archived) -->
+        <button v-if="!isArchived" @click="showChat = true" class="btn-ghost p-2">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
         </button>
-        <!-- Edit button -->
-        <button @click="router.push(`/plants/${plant.id}/edit`)" class="btn-ghost p-2">
+        <!-- Edit button (hide for archived) -->
+        <button v-if="!isArchived" @click="router.push(`/plants/${plant.id}/edit`)" class="btn-ghost p-2">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
           </svg>
@@ -297,15 +319,26 @@ const loadingMessage = computed(() => {
 
         <!-- Badges -->
         <div class="absolute top-3 right-3 flex flex-col gap-2 items-end">
+          <!-- Archived/Memorial badge -->
+          <span
+            v-if="isArchived"
+            class="px-3 py-1 text-sm font-medium rounded-full bg-gray-700 text-white shadow-sm flex items-center gap-1"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+            </svg>
+            In Memory
+          </span>
           <!-- Propagation badge -->
           <span
-            v-if="plant.is_propagation"
+            v-if="plant.is_propagation && !isArchived"
             class="px-3 py-1 text-sm font-medium rounded-full bg-purple-100 text-purple-700 shadow-sm"
           >
             Propagation
           </span>
-          <!-- Health badge (clickable to change) -->
+          <!-- Health badge (clickable to change, hide for archived) -->
           <button
+            v-if="!isArchived"
             @click="showHealthPicker = true"
             class="px-3 py-1 text-sm font-medium rounded-full capitalize flex items-center gap-1 shadow-sm"
             :class="healthColors[plant.health_status] || 'bg-gray-100 text-gray-500'"
@@ -317,8 +350,9 @@ const loadingMessage = computed(() => {
           </button>
         </div>
 
-        <!-- Add photo button -->
+        <!-- Add photo button (hide for archived) -->
         <button
+          v-if="!isArchived"
           @click="showPhotoUpload = true"
           class="absolute bottom-3 right-3 btn-primary px-3 py-2 shadow-lg"
         >
@@ -413,8 +447,24 @@ const loadingMessage = computed(() => {
         </p>
       </div>
 
-      <!-- Care Plan Schedule -->
-      <div class="mb-6">
+      <!-- Memorial info for archived plants -->
+      <div v-if="isArchived" class="card p-4 mb-6 bg-gray-50 border-gray-200">
+        <div class="flex items-center gap-2 mb-2">
+          <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+          </svg>
+          <h2 class="font-semibold text-gray-700">In Loving Memory</h2>
+        </div>
+        <p class="text-sm text-gray-600">
+          Archived on {{ new Date(plant.archived_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) }}
+        </p>
+        <p v-if="plant.death_reason" class="text-sm text-gray-500 mt-2 italic">
+          "{{ plant.death_reason }}"
+        </p>
+      </div>
+
+      <!-- Care Plan Schedule (hide for archived) -->
+      <div v-if="!isArchived" class="mb-6">
         <h2 class="font-semibold text-gray-900 mb-3">Care Schedule</h2>
         <div v-if="upcomingTasks.length > 0" class="card divide-y">
           <div
@@ -443,11 +493,12 @@ const loadingMessage = computed(() => {
         </div>
       </div>
 
-      <!-- Care History -->
+      <!-- Care History (show read-only for archived, with Log Care button for active) -->
       <div class="mb-6">
         <div class="flex items-center justify-between mb-3">
           <h2 class="font-semibold text-gray-900">Care History</h2>
           <button
+            v-if="!isArchived"
             @click="showCareLogModal = true"
             class="text-sm text-plant-600 font-medium flex items-center gap-1 hover:text-plant-700"
           >
@@ -519,13 +570,25 @@ const loadingMessage = computed(() => {
         </div>
       </div>
 
-      <!-- Delete button -->
-      <div class="mt-8 pt-6 border-t">
+      <!-- Action buttons -->
+      <div class="mt-8 pt-6 border-t space-y-3">
+        <!-- Archive button (for active plants) -->
+        <button
+          v-if="!isArchived"
+          @click="showArchiveModal = true"
+          class="w-full text-gray-600 text-sm font-medium py-3 flex items-center justify-center gap-2 hover:text-gray-800"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+          </svg>
+          Send to Graveyard
+        </button>
+        <!-- Delete button (permanent delete, for both active and archived) -->
         <button
           @click="showDeleteConfirm = true"
           class="w-full text-red-600 text-sm font-medium py-3"
         >
-          Delete Plant
+          {{ isArchived ? 'Delete Permanently' : 'Delete Plant' }}
         </button>
       </div>
     </template>
@@ -575,6 +638,51 @@ const loadingMessage = computed(() => {
           </button>
           <button @click="deletePlant" class="btn flex-1 bg-red-500 text-white hover:bg-red-600">
             Delete
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Archive modal (send to graveyard) -->
+    <div v-if="showArchiveModal" class="fixed inset-0 bg-black/50 flex items-end justify-center z-50">
+      <div class="bg-white rounded-t-3xl w-full max-w-lg p-6 safe-bottom">
+        <div class="flex items-center gap-2 mb-2">
+          <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+          </svg>
+          <h3 class="text-lg font-semibold">Send to Graveyard</h3>
+        </div>
+        <p class="text-gray-500 text-sm mb-4">
+          {{ plant?.name }} will be archived as a memorial. You can still view its photos and care history.
+        </p>
+
+        <div class="mb-4">
+          <label for="death-reason" class="block text-sm font-medium text-gray-700 mb-1">
+            What happened? (optional)
+          </label>
+          <input
+            id="death-reason"
+            v-model="archiveReason"
+            type="text"
+            class="input"
+            placeholder="e.g., Root rot, Overwatered, Cat ate it..."
+          >
+        </div>
+
+        <div class="flex gap-3">
+          <button @click="showArchiveModal = false" class="btn-secondary flex-1">
+            Cancel
+          </button>
+          <button
+            @click="archivePlant"
+            :disabled="archiving"
+            class="btn flex-1 bg-gray-700 text-white hover:bg-gray-800"
+          >
+            <span v-if="archiving" class="flex items-center justify-center gap-2">
+              <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              Archiving...
+            </span>
+            <span v-else>Archive Plant</span>
           </button>
         </div>
       </div>

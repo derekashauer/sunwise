@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useApi } from '@/composables/useApi'
+import { APP_VERSION } from '@/config'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -46,6 +47,11 @@ const savingGallery = ref(false)
 const galleryEnabled = ref(false)
 const galleryName = ref('')
 
+// Task types
+const taskTypes = ref([])
+const taskTypesLoading = ref(true)
+const savingTaskTypes = ref(false)
+
 onMounted(async () => {
   if ('Notification' in window && Notification.permission === 'granted') {
     notificationsEnabled.value = true
@@ -53,7 +59,8 @@ onMounted(async () => {
   await Promise.all([
     loadAiSettings(),
     loadNotificationSettings(),
-    loadGallerySettings()
+    loadGallerySettings(),
+    loadTaskTypes()
   ])
 })
 
@@ -100,6 +107,37 @@ async function loadGallerySettings() {
     console.error('Failed to load gallery settings:', e)
   } finally {
     galleryLoading.value = false
+  }
+}
+
+async function loadTaskTypes() {
+  taskTypesLoading.value = true
+  try {
+    const response = await api.get('/settings/task-types')
+    taskTypes.value = response.task_types || []
+  } catch (e) {
+    console.error('Failed to load task types:', e)
+  } finally {
+    taskTypesLoading.value = false
+  }
+}
+
+async function toggleTaskType(taskType) {
+  const task = taskTypes.value.find(t => t.type === taskType)
+  if (!task) return
+
+  savingTaskTypes.value = true
+  try {
+    const newEnabled = !task.enabled
+    await api.put('/settings/task-types', {
+      settings: { [taskType]: newEnabled }
+    })
+    task.enabled = newEnabled
+    window.$toast?.success(`${task.label} ${newEnabled ? 'enabled' : 'disabled'}`)
+  } catch (e) {
+    window.$toast?.error('Failed to update task type')
+  } finally {
+    savingTaskTypes.value = false
   }
 }
 
@@ -204,7 +242,24 @@ async function setDefaultProvider(provider) {
   try {
     await api.put('/settings/ai/default-provider', { provider })
     aiSettings.value.default_provider = provider
-    window.$toast?.success(`Default AI set to ${provider === 'openai' ? 'GPT-5.2' : 'Claude'}`)
+    const modelName = provider === 'openai'
+      ? aiSettings.value.available_models?.openai?.[aiSettings.value.openai_model] || 'OpenAI'
+      : aiSettings.value.available_models?.claude?.[aiSettings.value.claude_model] || 'Claude'
+    window.$toast?.success(`Default AI set to ${modelName}`)
+  } catch (e) {
+    window.$toast?.error(e.message)
+  }
+}
+
+async function setModel(provider, model) {
+  try {
+    const response = await api.put('/settings/ai/model', { provider, model })
+    if (provider === 'claude') {
+      aiSettings.value.claude_model = model
+    } else {
+      aiSettings.value.openai_model = model
+    }
+    window.$toast?.success(`Model updated to ${response.model_name}`)
   } catch (e) {
     window.$toast?.error(e.message)
   }
@@ -303,6 +358,49 @@ const galleryUrl = computed(() => {
       </div>
     </div>
 
+    <!-- Quick Links -->
+    <div class="card p-4 mb-6">
+      <h2 class="font-semibold text-gray-900 mb-3">Quick Links</h2>
+      <router-link
+        to="/shopping-list"
+        class="flex items-center justify-between p-3 -mx-1 rounded-xl hover:bg-gray-50 transition-colors"
+      >
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+            <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+            </svg>
+          </div>
+          <div>
+            <p class="font-medium text-gray-900">Shopping List</p>
+            <p class="text-sm text-gray-500">Plant supplies to buy</p>
+          </div>
+        </div>
+        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+        </svg>
+      </router-link>
+      <router-link
+        to="/pots"
+        class="flex items-center justify-between p-3 -mx-1 rounded-xl hover:bg-gray-50 transition-colors"
+      >
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-teal-100 rounded-full flex items-center justify-center">
+            <svg class="w-5 h-5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+            </svg>
+          </div>
+          <div>
+            <p class="font-medium text-gray-900">Pot Inventory</p>
+            <p class="text-sm text-gray-500">Track available pots</p>
+          </div>
+        </div>
+        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+        </svg>
+      </router-link>
+    </div>
+
     <!-- AI Settings -->
     <div class="card p-4 mb-6">
       <h2 class="font-semibold text-gray-900 mb-3">AI Settings</h2>
@@ -326,7 +424,7 @@ const galleryUrl = computed(() => {
                   ? 'border-gray-200 hover:border-gray-300 text-gray-700'
                   : 'border-gray-100 text-gray-400 cursor-not-allowed'"
             >
-              GPT-5.2
+              OpenAI
             </button>
             <button
               @click="setDefaultProvider('claude')"
@@ -343,12 +441,57 @@ const galleryUrl = computed(() => {
           </div>
         </div>
 
+        <!-- Model Selection -->
+        <div class="pt-3 border-t">
+          <p class="text-sm font-medium text-gray-700 mb-3">AI Models</p>
+          <div class="space-y-3">
+            <!-- OpenAI Model -->
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">OpenAI Model</label>
+              <select
+                :value="aiSettings?.openai_model"
+                @change="setModel('openai', $event.target.value)"
+                :disabled="!aiSettings?.has_openai_key"
+                class="input text-sm"
+                :class="{ 'opacity-50 cursor-not-allowed': !aiSettings?.has_openai_key }"
+              >
+                <option
+                  v-for="(label, model) in aiSettings?.available_models?.openai || {}"
+                  :key="model"
+                  :value="model"
+                >
+                  {{ label }}
+                </option>
+              </select>
+            </div>
+            <!-- Claude Model -->
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Claude Model</label>
+              <select
+                :value="aiSettings?.claude_model"
+                @change="setModel('claude', $event.target.value)"
+                :disabled="!aiSettings?.has_claude_key"
+                class="input text-sm"
+                :class="{ 'opacity-50 cursor-not-allowed': !aiSettings?.has_claude_key }"
+              >
+                <option
+                  v-for="(label, model) in aiSettings?.available_models?.claude || {}"
+                  :key="model"
+                  :value="model"
+                >
+                  {{ label }}
+                </option>
+              </select>
+            </div>
+          </div>
+        </div>
+
         <!-- OpenAI Key -->
         <div class="pt-3 border-t">
           <div class="flex items-center justify-between mb-2">
             <div>
               <p class="font-medium text-gray-900">OpenAI API Key</p>
-              <p class="text-xs text-gray-500">For ChatGPT 5.2</p>
+              <p class="text-xs text-gray-500">For GPT-4o models</p>
             </div>
             <span
               v-if="aiSettings?.has_openai_key"
@@ -465,6 +608,44 @@ const galleryUrl = computed(() => {
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Task Types -->
+    <div class="card p-4 mb-6">
+      <h2 class="font-semibold text-gray-900 mb-1">Care Task Types</h2>
+      <p class="text-sm text-gray-500 mb-4">Choose which task types AI can create in your care plans</p>
+
+      <div v-if="taskTypesLoading" class="flex justify-center py-4">
+        <div class="w-5 h-5 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+
+      <div v-else class="space-y-2">
+        <button
+          v-for="task in taskTypes"
+          :key="task.type"
+          @click="toggleTaskType(task.type)"
+          :disabled="savingTaskTypes"
+          class="w-full flex items-center justify-between p-3 rounded-lg border transition-colors"
+          :class="task.enabled ? 'border-plant-200 bg-plant-50' : 'border-gray-200 bg-gray-50'"
+        >
+          <span class="text-sm font-medium" :class="task.enabled ? 'text-gray-900' : 'text-gray-500'">
+            {{ task.label }}
+          </span>
+          <div
+            class="w-10 h-6 rounded-full transition-colors relative"
+            :class="task.enabled ? 'bg-plant-500' : 'bg-gray-300'"
+          >
+            <div
+              class="absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform"
+              :class="task.enabled ? 'translate-x-5' : 'translate-x-1'"
+            ></div>
+          </div>
+        </button>
+      </div>
+
+      <p class="text-xs text-gray-500 mt-3">
+        Disabled task types won't appear in AI-generated care plans. You can still manually log these activities.
+      </p>
     </div>
 
     <!-- Push Notifications -->
@@ -724,11 +905,11 @@ const galleryUrl = computed(() => {
       <div class="space-y-3 text-sm">
         <div class="flex justify-between">
           <span class="text-gray-500">Version</span>
-          <span class="text-gray-900">0.5.1</span>
+          <span class="text-gray-900">{{ APP_VERSION }}</span>
         </div>
         <div class="flex justify-between">
           <span class="text-gray-500">AI Providers</span>
-          <span class="text-gray-900">GPT-5.2 / Claude</span>
+          <span class="text-gray-900">OpenAI / Claude</span>
         </div>
       </div>
     </div>
