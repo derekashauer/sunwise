@@ -76,7 +76,7 @@ class PlantController
         $stmt->execute([$deathReason, $plantId]);
 
         // Deactivate care plan
-        $stmt = db()->prepare('UPDATE care_plans SET active = 0 WHERE plant_id = ?');
+        $stmt = db()->prepare('UPDATE care_plans SET is_active = 0 WHERE plant_id = ?');
         $stmt->execute([$plantId]);
 
         // Delete pending tasks

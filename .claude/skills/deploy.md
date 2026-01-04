@@ -89,14 +89,22 @@ SSHPASS='yzr5vup9tre_qje5QFB' sshpass -e scp -o StrictHostKeyChecking=no -P 1876
   u2925-zcqkhbjywpqt@ssh.dereka328.sg-host.com:~/www/dereka328.sg-host.com/public_html/api/<path>
 ```
 
-### 8. Run Migrations (if new migration files)
+### 8. Run Database Migrations
 
-If any new migration files were added:
+**ALWAYS run migrations** to ensure database schema is up to date. The migration system is idempotent (safe to run multiple times).
+
 ```bash
 SSHPASS='yzr5vup9tre_qje5QFB' sshpass -e ssh -o StrictHostKeyChecking=no -p 18765 \
   u2925-zcqkhbjywpqt@ssh.dereka328.sg-host.com \
-  'cd ~/www/dereka328.sg-host.com/public_html && php api/config/database.php 2>&1'
+  'cd ~/www/dereka328.sg-host.com/public_html && php -r "
+require \"api/config/config.php\";
+require \"api/config/database.php\";
+Database::runMigrations();
+echo \"Migrations complete\n\";
+" 2>&1'
 ```
+
+If migrations fail with "duplicate column" errors, check if schema is already up to date (this is expected for re-runs).
 
 ### 9. Verify and Report
 
