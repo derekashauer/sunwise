@@ -66,6 +66,21 @@ export const useTasksStore = defineStore('tasks', () => {
     return response.task
   }
 
+  async function bulkCompleteTasks(taskIds, notes = null) {
+    const response = await api.post('/tasks/bulk-complete', { task_ids: taskIds, notes })
+
+    // Update local state - mark completed tasks
+    const now = new Date().toISOString()
+    for (const taskId of response.completed) {
+      const index = todayTasks.value.findIndex(t => t.id === taskId)
+      if (index !== -1) {
+        todayTasks.value[index].completed_at = now
+      }
+    }
+
+    return response
+  }
+
   async function getPlantTasks(plantId) {
     const response = await api.get(`/tasks/plant/${plantId}`)
     return response.tasks
@@ -82,6 +97,7 @@ export const useTasksStore = defineStore('tasks', () => {
     fetchUpcomingTasks,
     completeTask,
     skipTask,
+    bulkCompleteTasks,
     getPlantTasks
   }
 })

@@ -53,7 +53,8 @@ const form = ref({
   propagation_date: null,
   parent_plant_id: null,
   has_grow_light: false,
-  grow_light_hours: null
+  grow_light_hours: null,
+  has_drainage: true
 })
 
 const imageFile = ref(null)
@@ -127,7 +128,8 @@ onMounted(async () => {
         propagation_date: plant.propagation_date || null,
         parent_plant_id: plant.parent_plant_id || null,
         has_grow_light: !!plant.has_grow_light,
-        grow_light_hours: plant.grow_light_hours || null
+        grow_light_hours: plant.grow_light_hours || null,
+        has_drainage: plant.has_drainage !== 0
       }
       if (plant.thumbnail) {
         imagePreview.value = `/uploads/plants/${plant.thumbnail}`
@@ -368,13 +370,13 @@ function skipCarePlanUpdate() {
     </header>
 
     <form @submit.prevent="handleSubmit" class="space-y-6">
-      <div v-if="error" class="p-3 bg-red-50 text-red-700 text-sm rounded-xl">
+      <div v-if="error" class="p-3 bg-terracotta-50 text-terracotta-700 text-sm rounded-xl border border-terracotta-200">
         {{ error }}
       </div>
 
       <!-- Photo upload -->
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-2">Photo</label>
+        <label class="form-label">Photo</label>
         <div class="relative">
           <input
             type="file"
@@ -390,20 +392,21 @@ function skipCarePlanUpdate() {
           >
             <div
               v-if="imagePreview"
-              class="aspect-square rounded-2xl overflow-hidden bg-gray-100"
+              class="aspect-square rounded-2xl overflow-hidden bg-cream-200"
             >
               <img :src="imagePreview" alt="Plant preview" class="w-full h-full object-cover">
             </div>
             <div
               v-else
-              class="aspect-square rounded-2xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center bg-gray-50 hover:bg-gray-100 transition-colors"
+              class="aspect-square rounded-2xl border-2 border-dashed border-sage-300 flex flex-col items-center justify-center bg-cream-100 hover:bg-cream-200 transition-colors"
             >
-              <svg class="w-12 h-12 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              <span class="text-sm text-gray-500">Tap to add photo</span>
-              <span class="text-xs text-gray-400 mt-1">AI will identify your plant</span>
+              <img
+                src="https://img.icons8.com/doodle/96/camera.png"
+                alt="add photo"
+                class="w-16 h-16 mb-2"
+              >
+              <span class="text-sm text-charcoal-500">Tap to add photo</span>
+              <span class="text-xs text-charcoal-400 mt-1">AI will identify your plant</span>
             </div>
           </label>
         </div>
@@ -412,19 +415,25 @@ function skipCarePlanUpdate() {
       <!-- Name with dice roll -->
       <div>
         <div class="flex items-center justify-between mb-1">
-          <label for="name" class="block text-sm font-medium text-gray-700">Name *</label>
+          <label for="name" class="form-label mb-0">Name *</label>
           <button
             type="button"
             @click="generateNames"
             :disabled="generatingNames"
-            class="text-sm text-plant-600 hover:text-plant-700 flex items-center gap-1"
+            class="text-sm text-sage-600 hover:text-sage-700 flex items-center gap-1"
           >
-            <svg v-if="generatingNames" class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-            </svg>
+            <img
+              v-if="generatingNames"
+              src="https://img.icons8.com/doodle/48/watering-can.png"
+              alt="loading"
+              class="w-4 h-4 loading-watering-can"
+            >
+            <img
+              v-else
+              src="https://img.icons8.com/doodle/48/dice.png"
+              alt=""
+              class="w-4 h-4"
+            >
             Random name
           </button>
         </div>
@@ -436,15 +445,15 @@ function skipCarePlanUpdate() {
           placeholder="e.g., Living Room Monstera"
         >
         <!-- Name suggestions dropdown -->
-        <div v-if="showNameSuggestions && suggestedNames.length > 0" class="mt-2 p-2 bg-white border border-gray-200 rounded-xl shadow-lg">
-          <p class="text-xs text-gray-500 mb-2">Pick a name:</p>
+        <div v-if="showNameSuggestions && suggestedNames.length > 0" class="mt-2 p-2 bg-white border border-cream-200 rounded-xl shadow-warm">
+          <p class="text-xs text-charcoal-400 mb-2">Pick a name:</p>
           <div class="space-y-1">
             <button
               v-for="name in suggestedNames"
               :key="name"
               type="button"
               @click="selectName(name)"
-              class="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-plant-50 hover:text-plant-700 transition-colors"
+              class="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-sage-50 hover:text-sage-700 transition-colors"
             >
               {{ name }}
             </button>
@@ -453,7 +462,7 @@ function skipCarePlanUpdate() {
             type="button"
             @click="generateNames"
             :disabled="generatingNames"
-            class="w-full mt-2 text-xs text-plant-600 hover:text-plant-700"
+            class="w-full mt-2 text-xs text-sage-600 hover:text-sage-700"
           >
             Roll again
           </button>
@@ -462,9 +471,9 @@ function skipCarePlanUpdate() {
 
       <!-- Species (auto-filled by AI) -->
       <div>
-        <label for="species" class="block text-sm font-medium text-gray-700 mb-1">
+        <label for="species" class="form-label">
           Species
-          <span class="text-gray-400 font-normal">(AI will identify)</span>
+          <span class="text-charcoal-300 font-normal">(AI will identify)</span>
         </label>
         <input
           id="species"
@@ -477,7 +486,7 @@ function skipCarePlanUpdate() {
 
       <!-- Location -->
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-2">Location</label>
+        <label class="form-label">Location</label>
         <div v-if="!showAddLocation">
           <div class="flex flex-wrap gap-2 mb-2">
             <button
@@ -487,15 +496,15 @@ function skipCarePlanUpdate() {
               @click="form.location_id = location.id"
               class="px-3 py-2 rounded-xl border-2 text-sm transition-all"
               :class="form.location_id === location.id
-                ? 'border-plant-500 bg-plant-50 text-plant-700'
-                : 'border-gray-200 hover:border-gray-300 text-gray-700'"
+                ? 'border-sage-500 bg-sage-50 text-sage-700'
+                : 'border-cream-300 hover:border-charcoal-200 text-charcoal-600'"
             >
               {{ location.name }}
             </button>
             <button
               type="button"
               @click="showAddLocation = true"
-              class="px-3 py-2 rounded-xl border-2 border-dashed border-gray-300 text-sm text-gray-500 hover:border-gray-400 hover:text-gray-600"
+              class="px-3 py-2 rounded-xl border-2 border-dashed border-sage-300 text-sm text-charcoal-400 hover:border-sage-400 hover:text-charcoal-600"
             >
               + Add Location
             </button>
@@ -504,7 +513,7 @@ function skipCarePlanUpdate() {
             v-if="form.location_id"
             type="button"
             @click="form.location_id = null"
-            class="text-sm text-gray-500 hover:text-gray-700"
+            class="text-sm text-charcoal-400 hover:text-charcoal-600"
           >
             Clear selection
           </button>
@@ -524,7 +533,7 @@ function skipCarePlanUpdate() {
 
       <!-- Pot size (hide for propagations in water) -->
       <div v-if="!form.is_propagation || (form.soil_type !== 'water' && form.soil_type !== 'rooting')">
-        <label class="block text-sm font-medium text-gray-700 mb-2">Pot Size</label>
+        <label class="form-label">Pot Size</label>
         <div class="grid grid-cols-2 gap-2">
           <button
             v-for="size in potSizes"
@@ -533,10 +542,10 @@ function skipCarePlanUpdate() {
             @click="form.pot_size = size.value"
             class="p-3 rounded-xl border-2 text-left transition-all"
             :class="form.pot_size === size.value
-              ? 'border-plant-500 bg-plant-50'
-              : 'border-gray-200 hover:border-gray-300'"
+              ? 'border-sage-500 bg-sage-50'
+              : 'border-cream-300 hover:border-charcoal-200'"
           >
-            <span class="text-sm font-medium" :class="form.pot_size === size.value ? 'text-plant-700' : 'text-gray-700'">
+            <span class="text-sm font-medium" :class="form.pot_size === size.value ? 'text-sage-700' : 'text-charcoal-600'">
               {{ size.label }}
             </span>
           </button>
@@ -545,12 +554,31 @@ function skipCarePlanUpdate() {
 
       <!-- Soil type (hide for propagations) -->
       <div v-if="!form.is_propagation">
-        <label for="soil" class="block text-sm font-medium text-gray-700 mb-1">Soil Type</label>
+        <label for="soil" class="form-label">Soil Type</label>
         <select id="soil" v-model="form.soil_type" class="input">
           <option v-for="soil in soilTypes" :key="soil.value" :value="soil.value">
             {{ soil.label }}
           </option>
         </select>
+      </div>
+
+      <!-- Drainage (hide for water propagations) -->
+      <div v-if="!form.is_propagation || (form.soil_type !== 'water')" class="flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200">
+        <input
+          type="checkbox"
+          id="drainage"
+          v-model="form.has_drainage"
+          class="w-5 h-5 rounded border-gray-300 text-plant-600 focus:ring-plant-500"
+        >
+        <label for="drainage" class="flex-1 cursor-pointer">
+          <span class="text-sm font-medium text-gray-700">Pot has drainage holes</span>
+          <span class="text-xs text-gray-500 block">Drainage helps prevent root rot</span>
+        </label>
+        <img
+          src="https://img.icons8.com/doodle/48/potted-plant.png"
+          alt=""
+          class="w-6 h-6 opacity-50"
+        >
       </div>
 
       <!-- Light condition -->
@@ -862,9 +890,7 @@ function skipCarePlanUpdate() {
             @click="copyShareLink"
             class="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors"
           >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
+            <img src="https://img.icons8.com/doodle-line/48/copy.png" alt="" class="w-5 h-5">
             Copy Link
           </button>
         </div>

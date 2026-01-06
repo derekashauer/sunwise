@@ -22,6 +22,7 @@ class TaskController
             WHERE p.user_id = ?
               AND t.due_date <= ?
               AND t.skipped_at IS NULL
+              AND p.archived_at IS NULL
             ORDER BY
                 CASE WHEN t.completed_at IS NULL THEN 0 ELSE 1 END,
                 CASE t.priority
@@ -147,6 +148,77 @@ class TaskController
     }
 
     /**
+     * Complete multiple tasks at once (bulk action)
+     */
+    public function bulkComplete(array $params, array $body, ?int $userId): array
+    {
+        $taskIds = $body['task_ids'] ?? [];
+        $notes = $body['notes'] ?? null;
+
+        if (empty($taskIds) || !is_array($taskIds)) {
+            return ['status' => 400, 'data' => ['error' => 'No task IDs provided']];
+        }
+
+        // Limit to 50 tasks per request
+        $taskIds = array_slice($taskIds, 0, 50);
+
+        $completed = [];
+        $failed = [];
+
+        foreach ($taskIds as $taskId) {
+            // Verify task ownership
+            $stmt = db()->prepare('
+                SELECT t.*, p.user_id
+                FROM tasks t
+                JOIN plants p ON t.plant_id = p.id
+                WHERE t.id = ?
+            ');
+            $stmt->execute([$taskId]);
+            $task = $stmt->fetch();
+
+            if (!$task || $task['user_id'] != $userId) {
+                $failed[] = $taskId;
+                continue;
+            }
+
+            if ($task['completed_at']) {
+                // Already completed, skip
+                $completed[] = $taskId;
+                continue;
+            }
+
+            // Mark as completed
+            $stmt = db()->prepare('UPDATE tasks SET completed_at = datetime("now"), notes = ? WHERE id = ?');
+            $stmt->execute([$notes, $taskId]);
+
+            // Log to care log
+            $stmt = db()->prepare('
+                INSERT INTO care_log (plant_id, task_id, action, notes)
+                VALUES (?, ?, ?, ?)
+            ');
+            $stmt->execute([
+                $task['plant_id'],
+                $taskId,
+                $task['task_type'],
+                $notes
+            ]);
+
+            // Generate next occurrence if recurring
+            if ($task['recurrence']) {
+                $this->generateNextOccurrence($task);
+            }
+
+            $completed[] = $taskId;
+        }
+
+        return [
+            'completed' => $completed,
+            'failed' => $failed,
+            'count' => count($completed)
+        ];
+    }
+
+    /**
      * Skip a task
      */
     public function skip(array $params, array $body, ?int $userId): array
@@ -239,16 +311,26 @@ class TaskController
         $stmt->execute([$task['plant_id']]);
         $careHistory = $stmt->fetchAll();
 
-        // Get recent health assessments from photos
+        // Get recent AI analysis from photos (contains health assessment)
         $stmt = db()->prepare('
-            SELECT health_assessment, uploaded_at
+            SELECT ai_analysis, uploaded_at
             FROM photos
-            WHERE plant_id = ? AND health_assessment IS NOT NULL
+            WHERE plant_id = ? AND ai_analysis IS NOT NULL
             ORDER BY uploaded_at DESC
             LIMIT 3
         ');
         $stmt->execute([$task['plant_id']]);
         $healthHistory = $stmt->fetchAll();
+
+        // Parse health status from AI analysis
+        $healthHistory = array_map(function($photo) {
+            $analysis = json_decode($photo['ai_analysis'], true);
+            return [
+                'health_assessment' => $analysis['health_status'] ?? null,
+                'uploaded_at' => $photo['uploaded_at']
+            ];
+        }, $healthHistory);
+        $healthHistory = array_filter($healthHistory, fn($h) => $h['health_assessment']);
 
         // Try to get weather data (if location available)
         $weather = $this->getWeatherContext();

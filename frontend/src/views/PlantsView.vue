@@ -14,6 +14,7 @@ const editingLocation = ref(null)
 const newLocationName = ref('')
 const savingLocation = ref(false)
 const selectedLocation = ref('all') // 'all' or location name
+const searchQuery = ref('')
 
 const windowOrientations = [
   { value: null, label: 'Not set', icon: '?' },
@@ -92,15 +93,29 @@ const locationOptions = computed(() => {
   })]
 })
 
-// Filter plants by selected location
+// Filter plants by selected location and search query
 const filteredPlants = computed(() => {
-  if (selectedLocation.value === 'all') {
-    return plants.plants
+  let result = plants.plants
+
+  // Filter by location
+  if (selectedLocation.value !== 'all') {
+    result = result.filter(p => {
+      const loc = p.location_name || 'No Location'
+      return loc === selectedLocation.value
+    })
   }
-  return plants.plants.filter(p => {
-    const loc = p.location_name || 'No Location'
-    return loc === selectedLocation.value
-  })
+
+  // Filter by search query
+  if (searchQuery.value.trim()) {
+    const query = searchQuery.value.toLowerCase().trim()
+    result = result.filter(p => {
+      const name = (p.name || '').toLowerCase()
+      const species = (p.species || '').toLowerCase()
+      return name.includes(query) || species.includes(query)
+    })
+  }
+
+  return result
 })
 
 // Group filtered plants by location
@@ -128,35 +143,71 @@ const plantsByLocation = computed(() => {
     <header class="flex items-center justify-between mb-4">
       <div>
         <h1 class="page-title mb-0">My Plants</h1>
-        <p class="text-gray-500">{{ plants.plantsCount }} plant{{ plants.plantsCount !== 1 ? 's' : '' }}</p>
+        <p class="text-charcoal-400 flex items-center gap-1">
+          <img
+            src="https://img.icons8.com/doodle/48/potted-plant--v1.png"
+            alt=""
+            class="w-4 h-4"
+          >
+          {{ plants.plantsCount }} plant{{ plants.plantsCount !== 1 ? 's' : '' }}
+        </p>
       </div>
       <div class="flex gap-2">
         <button @click="showLocationsPanel = !showLocationsPanel" class="btn-secondary px-3">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
+          <img
+            src="https://img.icons8.com/doodle/48/place-marker.png"
+            alt="locations"
+            class="w-5 h-5"
+          >
         </button>
         <button @click="router.push('/plants/add')" class="btn-primary">
-          <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-          </svg>
+          <img
+            src="https://img.icons8.com/doodle-line/60/plus.png"
+            alt=""
+            class="w-5 h-5 mr-1"
+          >
           Add
         </button>
       </div>
     </header>
 
+    <!-- Search bar -->
+    <div v-if="plants.plants.length > 3" class="mb-4">
+      <div class="relative">
+        <img
+          src="https://img.icons8.com/doodle/48/search.png"
+          alt="search"
+          class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 opacity-50"
+        >
+        <input
+          v-model="searchQuery"
+          type="text"
+          class="input pl-10 text-sm"
+          placeholder="Search by name or species..."
+        >
+        <button
+          v-if="searchQuery"
+          @click="searchQuery = ''"
+          class="absolute right-3 top-1/2 -translate-y-1/2 text-charcoal-400 hover:text-charcoal-600"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
     <!-- Location filter -->
-    <div v-if="plants.plants.length > 0 && locationOptions.length > 2" class="mb-4">
+    <div v-if="plants.plants.length > 0 && locationOptions.length > 2 && !searchQuery" class="mb-4">
       <div class="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4">
         <button
           v-for="loc in locationOptions"
           :key="loc"
           @click="selectedLocation = loc"
-          class="px-3 py-1.5 rounded-full text-sm whitespace-nowrap transition-all"
+          class="px-3 py-1.5 rounded-full text-sm whitespace-nowrap transition-all font-medium"
           :class="selectedLocation === loc
-            ? 'bg-plant-500 text-white'
-            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+            ? 'bg-sage-500 text-white shadow-sage'
+            : 'bg-cream-200 text-charcoal-500 hover:bg-cream-300'"
         >
           {{ loc === 'all' ? 'All Locations' : loc }}
         </button>
@@ -164,10 +215,17 @@ const plantsByLocation = computed(() => {
     </div>
 
     <!-- Locations Panel -->
-    <div v-if="showLocationsPanel" class="mb-6 p-4 bg-white rounded-2xl shadow-sm border border-gray-100">
+    <div v-if="showLocationsPanel" class="mb-6 card p-4">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="font-semibold text-gray-900">Manage Locations</h2>
-        <button @click="showLocationsPanel = false" class="text-gray-400 hover:text-gray-600">
+        <h2 class="font-hand text-xl text-charcoal-700 flex items-center gap-2">
+          <img
+            src="https://img.icons8.com/doodle/48/place-marker.png"
+            alt=""
+            class="w-6 h-6"
+          >
+          Manage Locations
+        </h2>
+        <button @click="showLocationsPanel = false" class="text-charcoal-400 hover:text-charcoal-600 p-1">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -193,7 +251,7 @@ const plantsByLocation = computed(() => {
         <div
           v-for="location in locationsStore.locations"
           :key="location.id"
-          class="p-3 bg-gray-50 rounded-xl"
+          class="p-3 bg-cream-100 rounded-xl"
         >
           <template v-if="editingLocation?.id === location.id">
             <!-- Editing mode -->
@@ -205,16 +263,16 @@ const plantsByLocation = computed(() => {
                 placeholder="Location name"
               >
               <div>
-                <label class="block text-xs text-gray-500 mb-1">Window Orientation</label>
+                <label class="block text-xs text-charcoal-400 mb-1">Window Orientation</label>
                 <div class="flex flex-wrap gap-1">
                   <button
                     v-for="orient in windowOrientations"
                     :key="orient.value"
                     @click="editingLocation.window_orientation = orient.value"
-                    class="px-2 py-1 text-xs rounded-lg border transition-all"
+                    class="px-2 py-1 text-xs rounded-lg border-2 transition-all"
                     :class="editingLocation.window_orientation === orient.value
-                      ? 'border-plant-500 bg-plant-50 text-plant-700'
-                      : 'border-gray-200 hover:border-gray-300 text-gray-600'"
+                      ? 'border-sage-500 bg-sage-50 text-sage-700'
+                      : 'border-cream-300 hover:border-charcoal-200 text-charcoal-500'"
                   >
                     {{ orient.label }}
                   </button>
@@ -241,18 +299,18 @@ const plantsByLocation = computed(() => {
             <!-- View mode -->
             <div class="flex items-center justify-between">
               <div>
-                <span class="font-medium text-gray-900">{{ location.name }}</span>
-                <span class="text-xs text-gray-500 ml-2">
+                <span class="font-medium text-charcoal-700">{{ location.name }}</span>
+                <span class="text-xs text-charcoal-400 ml-2">
                   ({{ location.plant_count || 0 }} plants)
                 </span>
-                <span v-if="location.window_orientation" class="text-xs text-plant-600 ml-2">
+                <span v-if="location.window_orientation" class="text-xs text-sage-600 ml-2">
                   {{ getOrientationLabel(location.window_orientation) }}-facing
                 </span>
               </div>
               <div class="flex gap-1">
                 <button
                   @click="startEditLocation(location)"
-                  class="p-1 text-gray-400 hover:text-plant-600"
+                  class="p-1 text-charcoal-400 hover:text-sage-600"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -260,7 +318,7 @@ const plantsByLocation = computed(() => {
                 </button>
                 <button
                   @click="deleteLocation(location.id)"
-                  class="p-1 text-gray-400 hover:text-red-600"
+                  class="p-1 text-charcoal-400 hover:text-terracotta-600"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -271,27 +329,55 @@ const plantsByLocation = computed(() => {
           </template>
         </div>
       </div>
-      <p v-else class="text-sm text-gray-500 text-center py-4">
+      <p v-else class="text-sm text-charcoal-400 text-center py-4">
         No locations yet. Add one to organize your plants!
       </p>
     </div>
 
     <!-- Loading state -->
-    <div v-if="plants.loading" class="flex justify-center py-12">
-      <div class="w-8 h-8 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+    <div v-if="plants.loading" class="flex flex-col items-center justify-center py-12">
+      <img
+        src="https://img.icons8.com/doodle/96/watering-can.png"
+        alt="loading"
+        class="w-16 h-16 loading-watering-can"
+      >
+      <p class="text-charcoal-400 mt-4 font-hand text-xl">Loading your plants...</p>
     </div>
 
     <!-- Empty state -->
     <div v-else-if="plants.plants.length === 0" class="text-center py-12">
-      <div class="w-20 h-20 mx-auto mb-4 bg-plant-100 rounded-full flex items-center justify-center">
-        <svg class="w-10 h-10 text-plant-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19V6M12 6c-1.5-2-4-3-6-2 2.5.5 4 2.5 5 4.5M12 6c1.5-2 4-3 6-2-2.5.5-4 2.5-5 4.5M8 21h8" />
-        </svg>
+      <div class="w-24 h-24 mx-auto mb-4 bg-sage-100 rounded-3xl flex items-center justify-center shadow-sage">
+        <img
+          src="https://img.icons8.com/doodle/96/potted-plant--v1.png"
+          alt="plants"
+          class="w-14 h-14"
+        >
       </div>
-      <h2 class="text-lg font-semibold text-gray-900 mb-2">No plants yet</h2>
-      <p class="text-gray-500 mb-6">Add your first plant to get started</p>
+      <h2 class="font-hand text-2xl text-charcoal-600 mb-2">No plants yet!</h2>
+      <p class="text-charcoal-400 mb-6">Add your first plant to get started</p>
       <button @click="router.push('/plants/add')" class="btn-primary">
+        <img
+          src="https://img.icons8.com/doodle-line/60/plus.png"
+          alt=""
+          class="w-5 h-5 mr-2"
+        >
         Add Your First Plant
+      </button>
+    </div>
+
+    <!-- No search results -->
+    <div v-else-if="plants.plants.length > 0 && filteredPlants.length === 0" class="text-center py-12">
+      <div class="w-20 h-20 mx-auto mb-4 bg-cream-200 rounded-3xl flex items-center justify-center">
+        <img
+          src="https://img.icons8.com/doodle/96/search.png"
+          alt="no results"
+          class="w-10 h-10 opacity-50"
+        >
+      </div>
+      <h2 class="font-hand text-xl text-charcoal-600 mb-2">No plants found</h2>
+      <p class="text-charcoal-400 mb-4">Try a different search term</p>
+      <button @click="searchQuery = ''; selectedLocation = 'all'" class="btn-secondary">
+        Clear filters
       </button>
     </div>
 
@@ -300,12 +386,13 @@ const plantsByLocation = computed(() => {
       <div v-for="group in plantsByLocation" :key="group.name">
         <!-- Location header -->
         <div class="flex items-center gap-2 mb-3">
-          <svg class="w-4 h-4 text-plant-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          <span class="font-semibold text-gray-700">{{ group.name }}</span>
-          <span class="text-sm text-gray-400">({{ group.plants.length }})</span>
+          <img
+            src="https://img.icons8.com/doodle/48/place-marker.png"
+            alt="location"
+            class="w-5 h-5"
+          >
+          <span class="font-semibold text-charcoal-600">{{ group.name }}</span>
+          <span class="text-sm text-charcoal-300 bg-cream-200 px-2 py-0.5 rounded-full">{{ group.plants.length }}</span>
         </div>
         <!-- Plants grid for this location -->
         <div class="grid grid-cols-2 gap-4">
@@ -321,11 +408,13 @@ const plantsByLocation = computed(() => {
       <!-- Graveyard link -->
       <router-link
         to="/graveyard"
-        class="flex items-center justify-center gap-2 py-3 text-sm text-gray-400 hover:text-gray-600 transition-colors"
+        class="flex items-center justify-center gap-2 py-3 text-sm text-charcoal-400 hover:text-charcoal-600 transition-colors"
       >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-        </svg>
+        <img
+          src="https://img.icons8.com/doodle/48/poison.png"
+          alt=""
+          class="w-5 h-5 opacity-60"
+        >
         <span>Plant Graveyard</span>
       </router-link>
     </div>

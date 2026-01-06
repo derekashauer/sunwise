@@ -1,8 +1,11 @@
 <script setup>
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { useApi } from '@/composables/useApi'
 import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
+
+const router = useRouter()
 
 const props = defineProps({
   task: { type: Object, required: true },
@@ -23,6 +26,7 @@ const notes = ref('')
 
 // Skip modal state
 const showSkipModal = ref(false)
+const showImageModal = ref(false)
 const skipReason = ref('')
 const customSkipReason = ref('')
 const skipping = ref(false)
@@ -41,13 +45,26 @@ const skipReasons = [
 const emit = defineEmits(['completed', 'skipped'])
 
 const taskIcons = {
-  water: '💧',
-  fertilize: '🌱',
-  trim: '✂️',
-  repot: '🪴',
-  rotate: '🔄',
-  mist: '💨',
-  check: '👀'
+  water: { src: 'https://img.icons8.com/doodle/48/watering-can.png', alt: 'water' },
+  fertilize: { src: 'https://img.icons8.com/doodle/48/fertilization--v1.png', alt: 'fertilize' },
+  trim: { src: 'https://img.icons8.com/doodle/48/cut.png', alt: 'trim' },
+  repot: { src: 'https://img.icons8.com/doodle/48/potted-plant.png', alt: 'repot' },
+  rotate: { src: 'https://img.icons8.com/doodle/48/rotate-right.png', alt: 'rotate' },
+  mist: { src: 'https://img.icons8.com/doodle/48/splash.png', alt: 'mist' },
+  check: { src: 'https://img.icons8.com/doodle/48/visible--v1.png', alt: 'check' },
+  change_water: { src: 'https://img.icons8.com/doodle/48/water.png', alt: 'change water' },
+  check_roots: { src: 'https://img.icons8.com/doodle/48/root.png', alt: 'check roots' },
+  pot_up: { src: 'https://img.icons8.com/doodle/48/potted-plant.png', alt: 'pot up' }
+}
+
+function getTaskIcon(taskType) {
+  return taskIcons[taskType] || { src: 'https://img.icons8.com/doodle/48/todo-list.png', alt: 'task' }
+}
+
+function goToPlant() {
+  if (props.plant?.id || props.task.plant_id) {
+    router.push(`/plants/${props.plant?.id || props.task.plant_id}`)
+  }
 }
 
 async function toggleExpand() {
@@ -178,113 +195,114 @@ async function applyScheduleAdjustment() {
 </script>
 
 <template>
-  <div class="card" :class="{ 'opacity-60': completed }">
-    <div class="p-4 flex items-start gap-4">
+  <div class="bg-cream-50 rounded-2xl border-2 border-sage-100" :class="{ 'opacity-60': completed }">
+    <!-- Main row: checkbox, thumbnail, task info -->
+    <div class="flex items-center gap-3 p-3">
       <!-- Checkbox -->
       <button
         @click="handleCheckboxClick"
         :disabled="loading || completed"
-        class="w-6 h-6 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all"
-        :class="completed
-          ? 'bg-plant-500 border-plant-500'
-          : 'border-gray-300 hover:border-plant-500'"
+        class="task-checkbox flex-shrink-0"
+        :class="{ 'checked': completed }"
       >
         <svg v-if="completed" class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
         </svg>
-        <div v-else-if="loading" class="w-4 h-4 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+        <div v-else-if="loading" class="w-4 h-4 border-2 border-sage-500 border-t-transparent rounded-full animate-spin"></div>
       </button>
 
-      <!-- Content -->
+      <!-- Plant thumbnail (clickable to view larger) -->
+      <button
+        v-if="plant?.thumbnail || task.plant_thumbnail"
+        @click="showImageModal = true"
+        class="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 border-2 border-sage-200 hover:border-sage-400 transition-colors cursor-pointer"
+      >
+        <img :src="`/uploads/plants/${plant?.thumbnail || task.plant_thumbnail}`" :alt="plant?.name || task.plant_name" class="w-full h-full object-cover">
+      </button>
+      <div v-else class="w-12 h-12 rounded-xl bg-cream-200 flex items-center justify-center flex-shrink-0">
+        <img :src="getTaskIcon(task.task_type).src" :alt="getTaskIcon(task.task_type).alt" class="w-6 h-6">
+      </div>
+
+      <!-- Task info -->
       <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="text-lg">{{ taskIcons[task.task_type] || '📋' }}</span>
-          <span class="font-medium text-gray-900 capitalize">{{ task.task_type }}</span>
+        <div class="flex items-center gap-2">
+          <img :src="getTaskIcon(task.task_type).src" :alt="getTaskIcon(task.task_type).alt" class="w-5 h-5">
+          <span class="font-semibold text-charcoal-600 capitalize text-sm">{{ task.task_type.replace('_', ' ') }}</span>
           <span
             v-if="task.priority === 'high' || task.priority === 'urgent'"
-            class="px-2 py-0.5 text-xs font-medium rounded-full"
-            :class="task.priority === 'urgent' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'"
+            class="px-1.5 py-0.5 text-xs font-medium rounded-full"
+            :class="task.priority === 'urgent' ? 'bg-terracotta-100 text-terracotta-700' : 'bg-sunny-100 text-sunny-700'"
           >
             {{ task.priority }}
           </span>
         </div>
-
-        <p v-if="plant || task.plant_name" class="text-sm text-gray-500 truncate">
+        <button
+          @click="goToPlant"
+          class="text-sm text-charcoal-400 truncate hover:text-sage-600 hover:underline transition-colors text-left"
+        >
           {{ plant?.name || task.plant_name }}
-          <span v-if="plant?.location_name || task.plant_location" class="text-gray-400">· {{ plant?.location_name || task.plant_location }}</span>
-        </p>
-
-        <p v-if="task.instructions" class="text-sm text-gray-600 mt-2">
-          {{ task.instructions }}
-        </p>
-
-        <!-- Action buttons -->
-        <div v-if="!completed" class="mt-2 flex items-center gap-3">
-          <!-- Expand/collapse button for recommendations -->
-          <button
-            v-if="showRecommendations"
-            @click="toggleExpand"
-            class="text-xs text-plant-600 hover:text-plant-700 font-medium flex items-center gap-1"
-          >
-            <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': expanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-            </svg>
-            {{ expanded ? 'Hide' : 'How to' }}
-          </button>
-
-          <!-- Skip button -->
-          <button
-            @click="openSkipModal"
-            class="text-xs text-gray-500 hover:text-gray-700 font-medium flex items-center gap-1"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-            </svg>
-            Skip
-          </button>
-        </div>
+        </button>
       </div>
 
-      <!-- Plant thumbnail -->
-      <div v-if="plant?.thumbnail || task.plant_thumbnail" class="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0">
-        <img :src="`/uploads/plants/${plant?.thumbnail || task.plant_thumbnail}`" :alt="plant?.name || task.plant_name" class="w-full h-full object-cover">
-      </div>
+      <!-- Details button -->
+      <button
+        v-if="showRecommendations && !completed"
+        @click="toggleExpand"
+        class="p-2 text-charcoal-400 hover:text-sage-600 transition-colors flex-shrink-0"
+        :class="{ 'text-sage-600': expanded }"
+      >
+        <svg class="w-5 h-5 transition-transform" :class="{ 'rotate-180': expanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
     </div>
 
     <!-- Notes input for completing task -->
-    <div v-if="showNotesInput" class="px-4 pb-4 pt-0">
-      <div class="bg-plant-50 rounded-xl p-3 border border-plant-100">
-        <p class="text-sm text-gray-700 mb-2">Add a note about this care (optional)</p>
+    <div v-if="showNotesInput" class="px-3 pb-3">
+      <div class="bg-sage-50 rounded-xl p-3 border border-sage-200">
+        <p class="text-sm text-charcoal-600 mb-2">Add a note (optional)</p>
         <textarea
           v-model="notes"
           rows="2"
           class="input text-sm resize-none mb-2"
-          placeholder="e.g., Used 1 cup of water, leaves looking perky..."
+          placeholder="e.g., Used 1 cup of water..."
         ></textarea>
         <div class="flex gap-2">
           <button
             @click="cancelNotes"
-            class="btn-secondary text-sm flex-1"
+            class="btn-secondary text-xs py-1.5 px-3 flex-1"
           >
             Cancel
           </button>
           <button
             @click="complete(true)"
             :disabled="loading"
-            class="btn-primary text-sm flex-1"
+            class="btn-primary text-xs py-1.5 px-3 flex-1"
           >
-            <span v-if="loading" class="flex items-center justify-center gap-2">
+            <span v-if="loading" class="flex items-center justify-center gap-1">
               <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              Completing...
             </span>
-            <span v-else>Complete Task</span>
+            <span v-else>Complete</span>
           </button>
         </div>
       </div>
     </div>
 
-    <!-- AI Recommendations (expandable) -->
-    <div v-if="expanded && !showNotesInput" class="px-4 pb-4 pt-0">
+    <!-- Expanded details section -->
+    <div v-if="expanded && !showNotesInput" class="px-3 pb-3">
+      <!-- Action buttons -->
+      <div class="flex items-center gap-3 mb-3 pb-3 border-b border-cream-200">
+        <button
+          @click="openSkipModal"
+          class="text-xs text-charcoal-400 hover:text-terracotta-500 font-semibold flex items-center gap-1 transition-colors"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+          </svg>
+          Skip task
+        </button>
+      </div>
+
       <!-- Loading state -->
       <div v-if="loadingRecs" class="bg-plant-50 rounded-xl p-4 border border-plant-100">
         <div class="flex items-center gap-3">
@@ -315,10 +333,10 @@ async function applyScheduleAdjustment() {
         <!-- Amount/Timing -->
         <div v-if="recommendations.amount || recommendations.timing" class="flex flex-wrap gap-2 text-xs">
           <span v-if="recommendations.amount" class="bg-white px-2 py-1 rounded-lg border border-plant-200">
-            📏 {{ recommendations.amount }}
+            {{ recommendations.amount }}
           </span>
           <span v-if="recommendations.timing" class="bg-white px-2 py-1 rounded-lg border border-plant-200">
-            ⏰ {{ recommendations.timing }}
+            {{ recommendations.timing }}
           </span>
         </div>
 
@@ -335,7 +353,7 @@ async function applyScheduleAdjustment() {
 
         <!-- Warnings -->
         <div v-if="recommendations.warnings?.length" class="bg-yellow-50 rounded-lg p-3 border border-yellow-200">
-          <p class="text-xs font-medium text-yellow-800 mb-1">⚠️ Watch out</p>
+          <p class="text-xs font-medium text-yellow-800 mb-1">Watch out</p>
           <ul class="space-y-1 text-sm text-yellow-700">
             <li v-for="(warning, index) in recommendations.warnings" :key="index">{{ warning }}</li>
           </ul>
@@ -343,7 +361,7 @@ async function applyScheduleAdjustment() {
 
         <!-- Tips -->
         <div v-if="recommendations.tips?.length" class="text-sm text-gray-600">
-          <p class="text-xs font-medium text-gray-500 mb-1">💡 Tips</p>
+          <p class="text-xs font-medium text-gray-500 mb-1">Tips</p>
           <ul class="space-y-1">
             <li v-for="(tip, index) in recommendations.tips" :key="index">{{ tip }}</li>
           </ul>
@@ -477,6 +495,32 @@ async function applyScheduleAdjustment() {
               </button>
             </div>
           </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Image lightbox modal -->
+    <Teleport to="body">
+      <div
+        v-if="showImageModal"
+        class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+        @click.self="showImageModal = false"
+      >
+        <div class="relative max-w-lg w-full">
+          <button
+            @click="showImageModal = false"
+            class="absolute -top-12 right-0 text-white/80 hover:text-white p-2"
+          >
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <img
+            :src="`/uploads/plants/${plant?.thumbnail || task.plant_thumbnail}`"
+            :alt="plant?.name || task.plant_name"
+            class="w-full rounded-2xl shadow-2xl"
+          >
+          <p class="text-white text-center mt-3 font-medium">{{ plant?.name || task.plant_name }}</p>
         </div>
       </div>
     </Teleport>

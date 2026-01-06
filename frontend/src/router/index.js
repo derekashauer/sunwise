@@ -97,6 +97,12 @@ const routes = [
     name: 'plant-share',
     component: () => import('@/views/PlantShareView.vue'),
     meta: { requiresAuth: false, isGuest: true }
+  },
+  {
+    path: '/tasks/completed',
+    name: 'completed-tasks',
+    component: () => import('@/views/CompletedTasksView.vue'),
+    meta: { requiresAuth: true }
   }
 ]
 

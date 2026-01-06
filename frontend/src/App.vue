@@ -15,9 +15,9 @@ const showNav = computed(() => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-plant-50">
+  <div class="min-h-screen bg-cream-100">
     <router-view v-slot="{ Component }">
-      <transition name="fade" mode="out-in">
+      <transition name="page" mode="out-in">
         <component :is="Component" />
       </transition>
     </router-view>
@@ -28,13 +28,17 @@ const showNav = computed(() => {
 </template>
 
 <style>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.15s ease;
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-.fade-enter-from,
-.fade-leave-to {
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.page-leave-to {
   opacity: 0;
 }
 </style>

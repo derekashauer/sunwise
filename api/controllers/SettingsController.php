@@ -14,9 +14,12 @@ class SettingsController
     ];
 
     private const OPENAI_MODELS = [
+        'gpt-5.2' => 'GPT-5.2 (Most capable)',
+        'gpt-4.5-preview' => 'GPT-4.5 Preview',
         'gpt-4o' => 'GPT-4o (Balanced)',
         'gpt-4o-mini' => 'GPT-4o Mini (Fast & cheap)',
-        'gpt-4-turbo' => 'GPT-4 Turbo (Previous gen)'
+        'o1' => 'o1 (Advanced reasoning)',
+        'o1-mini' => 'o1 Mini (Efficient reasoning)'
     ];
 
     /**

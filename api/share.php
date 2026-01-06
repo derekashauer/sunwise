@@ -28,20 +28,14 @@ $isCrawler = preg_match(
 
 // If not a crawler, serve the SPA
 if (!$isCrawler) {
-    // Read and output the SPA index.html
-    $indexPath = dirname(__DIR__) . '/frontend/dist/index.html';
+    // Serve index.html from the web root (parent of /api/)
+    $indexPath = dirname(__DIR__) . '/index.html';
     if (file_exists($indexPath)) {
         readfile($indexPath);
-    } else {
-        // Fallback to public_html index
-        $publicIndex = dirname(dirname(__DIR__)) . '/public_html/index.html';
-        if (file_exists($publicIndex)) {
-            readfile($publicIndex);
-        } else {
-            // Last resort - just serve current directory index
-            readfile(__DIR__ . '/../index.html');
-        }
+        exit;
     }
+    // Fallback: redirect to the SPA URL
+    header('Location: /plant/' . $plantId);
     exit;
 }
 

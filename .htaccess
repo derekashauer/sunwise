@@ -13,8 +13,10 @@ RewriteBase /
 RewriteCond %{REQUEST_URI} ^/api/
 RewriteRule ^api/(.*)$ api/index.php [L,QSA]
 
-# Handle plant share pages with OG meta tags for social crawlers
-RewriteRule ^plant/(\d+)$ api/share.php [L,QSA]
+# Handle plant share pages for social crawlers
+# Detect social media crawlers and serve share.php for OG meta tags
+RewriteCond %{HTTP_USER_AGENT} facebookexternalhit|Facebot|Twitterbot|Pinterest|LinkedInBot|Slackbot|WhatsApp|Telegram|Discordbot|Applebot [NC]
+RewriteRule ^plant/(\d+)$ api/share.php [L]
 
 # Serve static files directly if they exist
 RewriteCond %{REQUEST_FILENAME} -f

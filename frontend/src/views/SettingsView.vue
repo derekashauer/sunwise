@@ -344,58 +344,60 @@ const galleryUrl = computed(() => {
 
     <!-- User info -->
     <div class="card p-4 mb-6">
-      <h2 class="font-semibold text-gray-900 mb-3">Account</h2>
+      <h2 class="font-hand text-xl text-charcoal-700 mb-3 flex items-center gap-2">
+        <img src="https://img.icons8.com/doodle/48/user-male-circle.png" alt="" class="w-6 h-6">
+        Account
+      </h2>
       <div class="flex items-center gap-3">
-        <div class="w-12 h-12 bg-plant-100 rounded-full flex items-center justify-center">
-          <span class="text-plant-600 font-semibold text-lg">
+        <div class="w-12 h-12 bg-sage-100 rounded-2xl flex items-center justify-center">
+          <span class="text-sage-600 font-semibold text-lg">
             {{ auth.user?.email?.charAt(0).toUpperCase() }}
           </span>
         </div>
         <div>
-          <p class="font-medium text-gray-900">{{ auth.user?.email }}</p>
-          <p class="text-sm text-gray-500">Member since {{ new Date(auth.user?.created_at).toLocaleDateString() }}</p>
+          <p class="font-medium text-charcoal-700">{{ auth.user?.email }}</p>
+          <p class="text-sm text-charcoal-400">Member since {{ new Date(auth.user?.created_at).toLocaleDateString() }}</p>
         </div>
       </div>
     </div>
 
     <!-- Quick Links -->
     <div class="card p-4 mb-6">
-      <h2 class="font-semibold text-gray-900 mb-3">Quick Links</h2>
+      <h2 class="font-hand text-xl text-charcoal-700 mb-3 flex items-center gap-2">
+        <img src="https://img.icons8.com/doodle/48/bookmark-ribbon.png" alt="" class="w-6 h-6">
+        Quick Links
+      </h2>
       <router-link
         to="/shopping-list"
-        class="flex items-center justify-between p-3 -mx-1 rounded-xl hover:bg-gray-50 transition-colors"
+        class="flex items-center justify-between p-3 -mx-1 rounded-xl hover:bg-cream-100 transition-colors"
       >
         <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-            <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-            </svg>
+          <div class="w-10 h-10 bg-sunny-100 rounded-2xl flex items-center justify-center">
+            <img src="https://img.icons8.com/doodle/48/shopping-cart.png" alt="" class="w-6 h-6">
           </div>
           <div>
-            <p class="font-medium text-gray-900">Shopping List</p>
-            <p class="text-sm text-gray-500">Plant supplies to buy</p>
+            <p class="font-medium text-charcoal-700">Shopping List</p>
+            <p class="text-sm text-charcoal-400">Plant supplies to buy</p>
           </div>
         </div>
-        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 text-charcoal-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
         </svg>
       </router-link>
       <router-link
         to="/pots"
-        class="flex items-center justify-between p-3 -mx-1 rounded-xl hover:bg-gray-50 transition-colors"
+        class="flex items-center justify-between p-3 -mx-1 rounded-xl hover:bg-cream-100 transition-colors"
       >
         <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-teal-100 rounded-full flex items-center justify-center">
-            <svg class="w-5 h-5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
-            </svg>
+          <div class="w-10 h-10 bg-terracotta-50 rounded-2xl flex items-center justify-center">
+            <img src="https://img.icons8.com/doodle/48/potted-plant--v1.png" alt="" class="w-6 h-6">
           </div>
           <div>
-            <p class="font-medium text-gray-900">Pot Inventory</p>
-            <p class="text-sm text-gray-500">Track available pots</p>
+            <p class="font-medium text-charcoal-700">Pot Inventory</p>
+            <p class="text-sm text-charcoal-400">Track available pots</p>
           </div>
         </div>
-        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 text-charcoal-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
         </svg>
       </router-link>
@@ -403,26 +405,29 @@ const galleryUrl = computed(() => {
 
     <!-- AI Settings -->
     <div class="card p-4 mb-6">
-      <h2 class="font-semibold text-gray-900 mb-3">AI Settings</h2>
+      <h2 class="font-hand text-xl text-charcoal-700 mb-3 flex items-center gap-2">
+        <img src="https://img.icons8.com/doodle/48/robot-2.png" alt="" class="w-6 h-6">
+        AI Settings
+      </h2>
 
       <div v-if="aiLoading" class="flex justify-center py-4">
-        <div class="w-6 h-6 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+        <img src="https://img.icons8.com/doodle/48/watering-can.png" alt="loading" class="w-8 h-8 loading-watering-can">
       </div>
 
       <div v-else class="space-y-4">
         <!-- Default provider -->
         <div>
-          <p class="text-sm font-medium text-gray-700 mb-2">Preferred AI Provider</p>
+          <p class="text-sm font-medium text-charcoal-600 mb-2">Preferred AI Provider</p>
           <div class="flex gap-2">
             <button
               @click="setDefaultProvider('openai')"
               :disabled="!canSetOpenaiDefault"
               class="flex-1 px-3 py-2 rounded-xl border-2 text-sm transition-all"
               :class="aiSettings?.default_provider === 'openai'
-                ? 'border-plant-500 bg-plant-50 text-plant-700'
+                ? 'border-sage-500 bg-sage-50 text-sage-700'
                 : canSetOpenaiDefault
-                  ? 'border-gray-200 hover:border-gray-300 text-gray-700'
-                  : 'border-gray-100 text-gray-400 cursor-not-allowed'"
+                  ? 'border-cream-300 hover:border-charcoal-200 text-charcoal-600'
+                  : 'border-cream-200 text-charcoal-300 cursor-not-allowed'"
             >
               OpenAI
             </button>
@@ -431,10 +436,10 @@ const galleryUrl = computed(() => {
               :disabled="!canSetClaudeDefault"
               class="flex-1 px-3 py-2 rounded-xl border-2 text-sm transition-all"
               :class="aiSettings?.default_provider === 'claude'
-                ? 'border-plant-500 bg-plant-50 text-plant-700'
+                ? 'border-sage-500 bg-sage-50 text-sage-700'
                 : canSetClaudeDefault
-                  ? 'border-gray-200 hover:border-gray-300 text-gray-700'
-                  : 'border-gray-100 text-gray-400 cursor-not-allowed'"
+                  ? 'border-cream-300 hover:border-charcoal-200 text-charcoal-600'
+                  : 'border-cream-200 text-charcoal-300 cursor-not-allowed'"
             >
               Claude
             </button>
@@ -442,12 +447,12 @@ const galleryUrl = computed(() => {
         </div>
 
         <!-- Model Selection -->
-        <div class="pt-3 border-t">
-          <p class="text-sm font-medium text-gray-700 mb-3">AI Models</p>
+        <div class="pt-3 border-t border-cream-200">
+          <p class="text-sm font-medium text-charcoal-600 mb-3">AI Models</p>
           <div class="space-y-3">
             <!-- OpenAI Model -->
             <div>
-              <label class="block text-xs text-gray-500 mb-1">OpenAI Model</label>
+              <label class="block text-xs text-charcoal-400 mb-1">OpenAI Model</label>
               <select
                 :value="aiSettings?.openai_model"
                 @change="setModel('openai', $event.target.value)"
@@ -466,7 +471,7 @@ const galleryUrl = computed(() => {
             </div>
             <!-- Claude Model -->
             <div>
-              <label class="block text-xs text-gray-500 mb-1">Claude Model</label>
+              <label class="block text-xs text-charcoal-400 mb-1">Claude Model</label>
               <select
                 :value="aiSettings?.claude_model"
                 @change="setModel('claude', $event.target.value)"
@@ -487,26 +492,26 @@ const galleryUrl = computed(() => {
         </div>
 
         <!-- OpenAI Key -->
-        <div class="pt-3 border-t">
+        <div class="pt-3 border-t border-cream-200">
           <div class="flex items-center justify-between mb-2">
             <div>
-              <p class="font-medium text-gray-900">OpenAI API Key</p>
-              <p class="text-xs text-gray-500">For GPT-4o models</p>
+              <p class="font-medium text-charcoal-700">OpenAI API Key</p>
+              <p class="text-xs text-charcoal-400">For GPT-4o models</p>
             </div>
             <span
               v-if="aiSettings?.has_openai_key"
-              class="text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full"
+              class="text-xs text-sage-700 bg-sage-50 px-2 py-1 rounded-full"
             >
               Configured
             </span>
           </div>
 
           <div v-if="aiSettings?.has_openai_key && !showOpenaiInput" class="flex items-center gap-2">
-            <span class="text-sm text-gray-500 flex-1">Key saved</span>
-            <button @click="showOpenaiInput = true" class="text-sm text-plant-600 hover:underline">
+            <span class="text-sm text-charcoal-400 flex-1">Key saved</span>
+            <button @click="showOpenaiInput = true" class="text-sm text-sage-600 hover:underline">
               Update
             </button>
-            <button @click="removeOpenaiKey" class="text-sm text-red-600 hover:underline">
+            <button @click="removeOpenaiKey" class="text-sm text-terracotta-600 hover:underline">
               Remove
             </button>
           </div>
@@ -538,9 +543,9 @@ const galleryUrl = computed(() => {
                 Cancel
               </button>
             </div>
-            <p class="text-xs text-gray-500">
+            <p class="text-xs text-charcoal-400">
               Get your key at
-              <a href="https://platform.openai.com/api-keys" target="_blank" class="text-plant-600 hover:underline">
+              <a href="https://platform.openai.com/api-keys" target="_blank" class="text-sage-600 hover:underline">
                 platform.openai.com
               </a>
             </p>
@@ -548,26 +553,26 @@ const galleryUrl = computed(() => {
         </div>
 
         <!-- Claude Key -->
-        <div class="pt-3 border-t">
+        <div class="pt-3 border-t border-cream-200">
           <div class="flex items-center justify-between mb-2">
             <div>
-              <p class="font-medium text-gray-900">Claude API Key</p>
-              <p class="text-xs text-gray-500">For Claude Opus 4.5</p>
+              <p class="font-medium text-charcoal-700">Claude API Key</p>
+              <p class="text-xs text-charcoal-400">For Claude Opus 4.5</p>
             </div>
             <span
               v-if="aiSettings?.has_claude_key"
-              class="text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full"
+              class="text-xs text-sage-700 bg-sage-50 px-2 py-1 rounded-full"
             >
               Configured
             </span>
           </div>
 
           <div v-if="aiSettings?.has_claude_key && !showClaudeInput" class="flex items-center gap-2">
-            <span class="text-sm text-gray-500 flex-1">Key saved</span>
-            <button @click="showClaudeInput = true" class="text-sm text-plant-600 hover:underline">
+            <span class="text-sm text-charcoal-400 flex-1">Key saved</span>
+            <button @click="showClaudeInput = true" class="text-sm text-sage-600 hover:underline">
               Update
             </button>
-            <button @click="removeClaudeKey" class="text-sm text-red-600 hover:underline">
+            <button @click="removeClaudeKey" class="text-sm text-terracotta-600 hover:underline">
               Remove
             </button>
           </div>
@@ -599,9 +604,9 @@ const galleryUrl = computed(() => {
                 Cancel
               </button>
             </div>
-            <p class="text-xs text-gray-500">
+            <p class="text-xs text-charcoal-400">
               Get your key at
-              <a href="https://console.anthropic.com/settings/keys" target="_blank" class="text-plant-600 hover:underline">
+              <a href="https://console.anthropic.com/settings/keys" target="_blank" class="text-sage-600 hover:underline">
                 console.anthropic.com
               </a>
             </p>
@@ -612,11 +617,14 @@ const galleryUrl = computed(() => {
 
     <!-- Task Types -->
     <div class="card p-4 mb-6">
-      <h2 class="font-semibold text-gray-900 mb-1">Care Task Types</h2>
-      <p class="text-sm text-gray-500 mb-4">Choose which task types AI can create in your care plans</p>
+      <h2 class="font-hand text-xl text-charcoal-700 mb-1 flex items-center gap-2">
+        <img src="https://img.icons8.com/doodle/48/reminders.png" alt="" class="w-6 h-6">
+        Care Task Types
+      </h2>
+      <p class="text-sm text-charcoal-400 mb-4">Choose which task types AI can create in your care plans</p>
 
       <div v-if="taskTypesLoading" class="flex justify-center py-4">
-        <div class="w-5 h-5 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+        <img src="https://img.icons8.com/doodle/48/watering-can.png" alt="loading" class="w-8 h-8 loading-watering-can">
       </div>
 
       <div v-else class="space-y-2">
@@ -625,15 +633,15 @@ const galleryUrl = computed(() => {
           :key="task.type"
           @click="toggleTaskType(task.type)"
           :disabled="savingTaskTypes"
-          class="w-full flex items-center justify-between p-3 rounded-lg border transition-colors"
-          :class="task.enabled ? 'border-plant-200 bg-plant-50' : 'border-gray-200 bg-gray-50'"
+          class="w-full flex items-center justify-between p-3 rounded-xl border-2 transition-colors"
+          :class="task.enabled ? 'border-sage-200 bg-sage-50' : 'border-cream-200 bg-cream-100'"
         >
-          <span class="text-sm font-medium" :class="task.enabled ? 'text-gray-900' : 'text-gray-500'">
+          <span class="text-sm font-medium" :class="task.enabled ? 'text-charcoal-700' : 'text-charcoal-400'">
             {{ task.label }}
           </span>
           <div
             class="w-10 h-6 rounded-full transition-colors relative"
-            :class="task.enabled ? 'bg-plant-500' : 'bg-gray-300'"
+            :class="task.enabled ? 'bg-sage-500' : 'bg-charcoal-200'"
           >
             <div
               class="absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform"
@@ -643,25 +651,28 @@ const galleryUrl = computed(() => {
         </button>
       </div>
 
-      <p class="text-xs text-gray-500 mt-3">
+      <p class="text-xs text-charcoal-400 mt-3">
         Disabled task types won't appear in AI-generated care plans. You can still manually log these activities.
       </p>
     </div>
 
     <!-- Push Notifications -->
     <div class="card p-4 mb-6">
-      <h2 class="font-semibold text-gray-900 mb-3">Push Notifications</h2>
+      <h2 class="font-hand text-xl text-charcoal-700 mb-3 flex items-center gap-2">
+        <img src="https://img.icons8.com/doodle/48/alarm.png" alt="" class="w-6 h-6">
+        Push Notifications
+      </h2>
 
       <div class="flex items-center justify-between">
         <div>
-          <p class="font-medium text-gray-900">Browser Notifications</p>
-          <p class="text-sm text-gray-500">Get reminders for plant care tasks</p>
+          <p class="font-medium text-charcoal-700">Browser Notifications</p>
+          <p class="text-sm text-charcoal-400">Get reminders for plant care tasks</p>
         </div>
         <button
           @click="toggleNotifications"
           :disabled="notificationsLoading"
           class="relative w-12 h-7 rounded-full transition-colors"
-          :class="notificationsEnabled ? 'bg-plant-500' : 'bg-gray-300'"
+          :class="notificationsEnabled ? 'bg-sage-500' : 'bg-charcoal-200'"
         >
           <span
             class="absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform"
@@ -673,22 +684,25 @@ const galleryUrl = computed(() => {
 
     <!-- Email Digest -->
     <div class="card p-4 mb-6">
-      <h2 class="font-semibold text-gray-900 mb-3">Daily Email Digest</h2>
+      <h2 class="font-hand text-xl text-charcoal-700 mb-3 flex items-center gap-2">
+        <img src="https://img.icons8.com/doodle/48/new-post.png" alt="" class="w-6 h-6">
+        Daily Email Digest
+      </h2>
 
       <div v-if="notificationLoading" class="flex justify-center py-4">
-        <div class="w-6 h-6 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+        <img src="https://img.icons8.com/doodle/48/watering-can.png" alt="loading" class="w-8 h-8 loading-watering-can">
       </div>
 
       <div v-else class="space-y-4">
         <div class="flex items-center justify-between">
           <div>
-            <p class="font-medium text-gray-900">Enable Daily Digest</p>
-            <p class="text-sm text-gray-500">Receive daily task summary via email</p>
+            <p class="font-medium text-charcoal-700">Enable Daily Digest</p>
+            <p class="text-sm text-charcoal-400">Receive daily task summary via email</p>
           </div>
           <button
             @click="emailDigestEnabled = !emailDigestEnabled"
             class="relative w-12 h-7 rounded-full transition-colors"
-            :class="emailDigestEnabled ? 'bg-plant-500' : 'bg-gray-300'"
+            :class="emailDigestEnabled ? 'bg-sage-500' : 'bg-charcoal-200'"
           >
             <span
               class="absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform"
@@ -699,13 +713,13 @@ const galleryUrl = computed(() => {
 
         <div v-if="emailDigestEnabled" class="space-y-3">
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Send Time</label>
+            <label class="form-label">Send Time</label>
             <input
               v-model="emailDigestTime"
               type="time"
               class="input"
             >
-            <p class="text-xs text-gray-500 mt-1">Time when daily digest will be sent</p>
+            <p class="text-xs text-charcoal-400 mt-1">Time when daily digest will be sent</p>
           </div>
 
           <button
@@ -725,22 +739,25 @@ const galleryUrl = computed(() => {
 
     <!-- SMS Notifications -->
     <div class="card p-4 mb-6">
-      <h2 class="font-semibold text-gray-900 mb-3">SMS Notifications</h2>
+      <h2 class="font-hand text-xl text-charcoal-700 mb-3 flex items-center gap-2">
+        <img src="https://img.icons8.com/doodle/48/speech-bubble-with-dots.png" alt="" class="w-6 h-6">
+        SMS Notifications
+      </h2>
 
       <div v-if="notificationLoading" class="flex justify-center py-4">
-        <div class="w-6 h-6 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+        <img src="https://img.icons8.com/doodle/48/watering-can.png" alt="loading" class="w-8 h-8 loading-watering-can">
       </div>
 
       <div v-else class="space-y-4">
         <div class="flex items-center justify-between">
           <div>
-            <p class="font-medium text-gray-900">Enable SMS Alerts</p>
-            <p class="text-sm text-gray-500">Requires your own Twilio account</p>
+            <p class="font-medium text-charcoal-700">Enable SMS Alerts</p>
+            <p class="text-sm text-charcoal-400">Requires your own Twilio account</p>
           </div>
           <button
             @click="smsEnabled = !smsEnabled"
             class="relative w-12 h-7 rounded-full transition-colors"
-            :class="smsEnabled ? 'bg-plant-500' : 'bg-gray-300'"
+            :class="smsEnabled ? 'bg-sage-500' : 'bg-charcoal-200'"
           >
             <span
               class="absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform"
@@ -751,7 +768,7 @@ const galleryUrl = computed(() => {
 
         <div v-if="smsEnabled" class="space-y-3">
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Your Phone Number</label>
+            <label class="form-label">Your Phone Number</label>
             <input
               v-model="smsPhone"
               type="tel"
@@ -761,21 +778,21 @@ const galleryUrl = computed(() => {
           </div>
 
           <div v-if="notificationSettings?.has_twilio_credentials && !showSmsSetup">
-            <p class="text-sm text-green-600 flex items-center gap-1">
+            <p class="text-sm text-sage-600 flex items-center gap-1">
               <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
               </svg>
               Twilio credentials configured
             </p>
-            <button @click="showSmsSetup = true" class="text-sm text-plant-600 hover:underline mt-1">
+            <button @click="showSmsSetup = true" class="text-sm text-sage-600 hover:underline mt-1">
               Update credentials
             </button>
           </div>
 
-          <div v-else class="space-y-3 p-3 bg-gray-50 rounded-xl">
-            <p class="text-sm font-medium text-gray-700">Twilio API Credentials</p>
+          <div v-else class="space-y-3 p-3 bg-cream-100 rounded-xl">
+            <p class="text-sm font-medium text-charcoal-600">Twilio API Credentials</p>
             <div>
-              <label class="block text-xs text-gray-500 mb-1">Account SID</label>
+              <label class="block text-xs text-charcoal-400 mb-1">Account SID</label>
               <input
                 v-model="twilioSid"
                 type="text"
@@ -784,7 +801,7 @@ const galleryUrl = computed(() => {
               >
             </div>
             <div>
-              <label class="block text-xs text-gray-500 mb-1">Auth Token</label>
+              <label class="block text-xs text-charcoal-400 mb-1">Auth Token</label>
               <input
                 v-model="twilioToken"
                 type="password"
@@ -793,7 +810,7 @@ const galleryUrl = computed(() => {
               >
             </div>
             <div>
-              <label class="block text-xs text-gray-500 mb-1">Twilio Phone Number</label>
+              <label class="block text-xs text-charcoal-400 mb-1">Twilio Phone Number</label>
               <input
                 v-model="twilioPhone"
                 type="tel"
@@ -801,9 +818,9 @@ const galleryUrl = computed(() => {
                 placeholder="+1 555 000 0000"
               >
             </div>
-            <p class="text-xs text-gray-500">
+            <p class="text-xs text-charcoal-400">
               Get your credentials at
-              <a href="https://www.twilio.com/console" target="_blank" class="text-plant-600 hover:underline">
+              <a href="https://www.twilio.com/console" target="_blank" class="text-sage-600 hover:underline">
                 twilio.com/console
               </a>
             </p>
@@ -826,22 +843,25 @@ const galleryUrl = computed(() => {
 
     <!-- Public Gallery -->
     <div class="card p-4 mb-6">
-      <h2 class="font-semibold text-gray-900 mb-3">Public Plant Gallery</h2>
+      <h2 class="font-hand text-xl text-charcoal-700 mb-3 flex items-center gap-2">
+        <img src="https://img.icons8.com/doodle/48/gallery.png" alt="" class="w-6 h-6">
+        Public Plant Gallery
+      </h2>
 
       <div v-if="galleryLoading" class="flex justify-center py-4">
-        <div class="w-6 h-6 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+        <img src="https://img.icons8.com/doodle/48/watering-can.png" alt="loading" class="w-8 h-8 loading-watering-can">
       </div>
 
       <div v-else class="space-y-4">
         <div class="flex items-center justify-between">
           <div>
-            <p class="font-medium text-gray-900">Enable Public Gallery</p>
-            <p class="text-sm text-gray-500">Share your plants with a public link</p>
+            <p class="font-medium text-charcoal-700">Enable Public Gallery</p>
+            <p class="text-sm text-charcoal-400">Share your plants with a public link</p>
           </div>
           <button
             @click="galleryEnabled = !galleryEnabled"
             class="relative w-12 h-7 rounded-full transition-colors"
-            :class="galleryEnabled ? 'bg-plant-500' : 'bg-gray-300'"
+            :class="galleryEnabled ? 'bg-sage-500' : 'bg-charcoal-200'"
           >
             <span
               class="absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform"
@@ -852,7 +872,7 @@ const galleryUrl = computed(() => {
 
         <div v-if="galleryEnabled" class="space-y-3">
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Gallery Name</label>
+            <label class="form-label">Gallery Name</label>
             <input
               v-model="galleryName"
               type="text"
@@ -861,8 +881,8 @@ const galleryUrl = computed(() => {
             >
           </div>
 
-          <div v-if="gallerySettings?.token" class="p-3 bg-plant-50 rounded-xl border border-plant-200">
-            <p class="text-sm font-medium text-plant-800 mb-2">Share Your Gallery</p>
+          <div v-if="gallerySettings?.token" class="p-3 bg-sage-50 rounded-xl border border-sage-200">
+            <p class="text-sm font-medium text-sage-800 mb-2">Share Your Gallery</p>
             <div class="flex items-stretch gap-2">
               <input
                 :value="galleryUrl"
@@ -874,13 +894,11 @@ const galleryUrl = computed(() => {
                 @click="copyGalleryLink"
                 class="btn-primary text-sm px-4 flex items-center gap-1.5"
               >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
+                <img src="https://img.icons8.com/doodle-line/48/copy.png" alt="" class="w-4 h-4 brightness-0 invert">
                 Copy Link
               </button>
             </div>
-            <p class="text-xs text-plant-600 mt-2">Anyone with this link can view your plant collection</p>
+            <p class="text-xs text-sage-600 mt-2">Anyone with this link can view your plant collection</p>
           </div>
 
           <button
@@ -900,16 +918,19 @@ const galleryUrl = computed(() => {
 
     <!-- App info -->
     <div class="card p-4 mb-6">
-      <h2 class="font-semibold text-gray-900 mb-3">About</h2>
+      <h2 class="font-hand text-xl text-charcoal-700 mb-3 flex items-center gap-2">
+        <img src="https://img.icons8.com/doodle/48/home-office.png" alt="" class="w-6 h-6">
+        About
+      </h2>
 
       <div class="space-y-3 text-sm">
         <div class="flex justify-between">
-          <span class="text-gray-500">Version</span>
-          <span class="text-gray-900">{{ APP_VERSION }}</span>
+          <span class="text-charcoal-400">Version</span>
+          <span class="text-charcoal-700 font-medium">{{ APP_VERSION }}</span>
         </div>
         <div class="flex justify-between">
-          <span class="text-gray-500">AI Providers</span>
-          <span class="text-gray-900">OpenAI / Claude</span>
+          <span class="text-charcoal-400">AI Providers</span>
+          <span class="text-charcoal-700">OpenAI / Claude</span>
         </div>
       </div>
     </div>
@@ -917,7 +938,7 @@ const galleryUrl = computed(() => {
     <!-- Logout -->
     <button
       @click="logout"
-      class="btn-secondary w-full text-red-600 border-red-200 hover:bg-red-50"
+      class="btn-secondary w-full text-terracotta-600 border-terracotta-200 hover:bg-terracotta-50"
     >
       Log Out
     </button>

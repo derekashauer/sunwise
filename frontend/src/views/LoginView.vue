@@ -44,42 +44,46 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col justify-center px-6 py-12 bg-plant-50">
+  <div class="min-h-screen flex flex-col justify-center px-6 py-12 bg-cream-100">
     <div class="sm:mx-auto sm:w-full sm:max-w-md">
       <!-- Logo -->
-      <div class="w-16 h-16 mx-auto mb-6 bg-plant-500 rounded-2xl flex items-center justify-center">
-        <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19V6M12 6c-1.5-2-4-3-6-2 2.5.5 4 2.5 5 4.5M12 6c1.5-2 4-3 6-2-2.5.5-4 2.5-5 4.5M8 21h8" />
-        </svg>
+      <div class="w-20 h-20 mx-auto mb-6 bg-sage-100 rounded-3xl flex items-center justify-center shadow-sage">
+        <img
+          src="https://img.icons8.com/doodle/96/potted-plant--v1.png"
+          alt="Sunwise"
+          class="w-12 h-12"
+        >
       </div>
 
-      <h1 class="text-2xl font-bold text-center text-gray-900">Welcome back</h1>
-      <p class="mt-2 text-center text-gray-500">Sign in to manage your plants</p>
+      <h1 class="font-hand text-3xl text-center text-charcoal-700">Welcome back!</h1>
+      <p class="mt-2 text-center text-charcoal-400">Sign in to care for your plants</p>
     </div>
 
     <div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
       <!-- Magic link sent confirmation -->
       <div v-if="magicLinkSent" class="card p-6 text-center">
-        <div class="w-12 h-12 mx-auto mb-4 bg-plant-100 rounded-full flex items-center justify-center">
-          <svg class="w-6 h-6 text-plant-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-          </svg>
+        <div class="w-14 h-14 mx-auto mb-4 bg-sage-100 rounded-2xl flex items-center justify-center">
+          <img
+            src="https://img.icons8.com/doodle/48/new-post.png"
+            alt="email"
+            class="w-8 h-8"
+          >
         </div>
-        <h2 class="text-lg font-semibold text-gray-900 mb-2">Check your email</h2>
-        <p class="text-gray-500 text-sm">We sent a magic link to <strong>{{ email }}</strong></p>
-        <button @click="magicLinkSent = false" class="mt-6 text-plant-600 text-sm font-medium">
+        <h2 class="font-hand text-xl text-charcoal-700 mb-2">Check your email</h2>
+        <p class="text-charcoal-400 text-sm">We sent a magic link to <strong class="text-charcoal-600">{{ email }}</strong></p>
+        <button @click="magicLinkSent = false" class="mt-6 text-sage-600 text-sm font-medium hover:text-sage-700">
           Use a different email
         </button>
       </div>
 
       <!-- Login form -->
       <form v-else @submit.prevent="handleSubmit" class="card p-6 space-y-5">
-        <div v-if="error" class="p-3 bg-red-50 text-red-700 text-sm rounded-lg">
+        <div v-if="error" class="p-3 bg-terracotta-50 text-terracotta-700 text-sm rounded-xl border border-terracotta-200">
           {{ error }}
         </div>
 
         <div>
-          <label for="email" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+          <label for="email" class="form-label">Email</label>
           <input
             id="email"
             v-model="email"
@@ -92,7 +96,7 @@ async function handleSubmit() {
         </div>
 
         <div v-if="!useMagicLink">
-          <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+          <label for="password" class="form-label">Password</label>
           <input
             id="password"
             v-model="password"
@@ -109,7 +113,11 @@ async function handleSubmit() {
           class="btn-primary w-full"
         >
           <span v-if="loading" class="flex items-center justify-center gap-2">
-            <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            <img
+              src="https://img.icons8.com/doodle/48/watering-can.png"
+              alt="loading"
+              class="w-5 h-5 loading-watering-can"
+            >
             {{ useMagicLink ? 'Sending...' : 'Signing in...' }}
           </span>
           <span v-else>{{ useMagicLink ? 'Send Magic Link' : 'Sign In' }}</span>
@@ -118,21 +126,21 @@ async function handleSubmit() {
         <button
           type="button"
           @click="useMagicLink = !useMagicLink"
-          class="w-full text-center text-sm text-gray-500 hover:text-gray-700"
+          class="w-full text-center text-sm text-charcoal-400 hover:text-charcoal-600"
         >
           {{ useMagicLink ? 'Use password instead' : 'Sign in with magic link' }}
         </button>
       </form>
 
-      <p class="mt-6 text-center text-sm text-gray-500">
+      <p class="mt-6 text-center text-sm text-charcoal-400">
         Don't have an account?
-        <router-link to="/register" class="text-plant-600 font-medium hover:text-plant-700">
+        <router-link to="/register" class="text-sage-600 font-medium hover:text-sage-700">
           Sign up
         </router-link>
       </p>
 
       <!-- Version number -->
-      <p class="mt-8 text-center text-xs text-gray-400">v{{ APP_VERSION }}</p>
+      <p class="mt-8 text-center text-xs text-charcoal-300">v{{ APP_VERSION }}</p>
     </div>
   </div>
 </template>
