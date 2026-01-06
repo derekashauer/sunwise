@@ -31,6 +31,7 @@ const savingNotification = ref(false)
 // Email digest form
 const emailDigestEnabled = ref(false)
 const emailDigestTime = ref('08:00')
+const sendingTestEmail = ref(false)
 
 // SMS form
 const smsEnabled = ref(false)
@@ -277,6 +278,22 @@ async function saveEmailDigest() {
     window.$toast?.error(e.message || 'Failed to save settings')
   } finally {
     savingNotification.value = false
+  }
+}
+
+async function sendTestEmail() {
+  sendingTestEmail.value = true
+  try {
+    const response = await api.get('/cron/test-email')
+    if (response.success) {
+      window.$toast?.success(`Test email sent to ${response.email}!`)
+    } else {
+      window.$toast?.error(response.message || 'Failed to send test email')
+    }
+  } catch (e) {
+    window.$toast?.error(e.message || 'Failed to send test email')
+  } finally {
+    sendingTestEmail.value = false
   }
 }
 
@@ -722,17 +739,30 @@ const galleryUrl = computed(() => {
             <p class="text-xs text-charcoal-400 mt-1">Time when daily digest will be sent</p>
           </div>
 
-          <button
-            @click="saveEmailDigest"
-            :disabled="savingNotification"
-            class="btn-primary text-sm px-4 py-2"
-          >
-            <span v-if="savingNotification" class="flex items-center gap-1">
-              <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              Saving...
-            </span>
-            <span v-else>Save Email Settings</span>
-          </button>
+          <div class="flex gap-2">
+            <button
+              @click="saveEmailDigest"
+              :disabled="savingNotification"
+              class="btn-primary text-sm px-4 py-2"
+            >
+              <span v-if="savingNotification" class="flex items-center gap-1">
+                <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                Saving...
+              </span>
+              <span v-else>Save Email Settings</span>
+            </button>
+            <button
+              @click="sendTestEmail"
+              :disabled="sendingTestEmail"
+              class="btn-secondary text-sm px-4 py-2"
+            >
+              <span v-if="sendingTestEmail" class="flex items-center gap-1">
+                <div class="w-3 h-3 border-2 border-sage-500 border-t-transparent rounded-full animate-spin"></div>
+                Sending...
+              </span>
+              <span v-else>Send Test Email</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -182,6 +182,10 @@ $routes = [
     'POST /shopping-list/{id}/toggle' => ['ShoppingListController', 'togglePurchased', true],
     'DELETE /shopping-list/{id}' => ['ShoppingListController', 'destroy', true],
     'DELETE /shopping-list/purchased' => ['ShoppingListController', 'clearPurchased', true],
+
+    // Cron routes (no auth, but protected by secret key in query param)
+    'GET /cron/daily-reminders' => ['CronController', 'dailyReminders'],
+    'GET /cron/test-email' => ['CronController', 'testEmail', true],
 ];
 
 // Match route
