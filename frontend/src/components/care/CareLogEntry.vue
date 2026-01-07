@@ -60,6 +60,9 @@ const photoUrl = computed(() => {
           <span v-if="entry.task_id" class="ml-1.5 text-xs text-plant-600 bg-plant-50 px-1.5 py-0.5 rounded">
             Task
           </span>
+          <span v-if="entry.performed_by_name" class="ml-1.5 text-xs text-gray-500">
+            by {{ entry.performed_by_name }}
+          </span>
         </div>
         <span class="text-xs text-gray-500 flex-shrink-0">{{ formatDate(entry.performed_at) }}</span>
       </div>

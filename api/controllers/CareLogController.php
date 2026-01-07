@@ -7,6 +7,29 @@
 class CareLogController
 {
     /**
+     * Check if user can access a specific plant (owns it or has household access)
+     */
+    private function canAccessPlant(int $plantId, int $userId): bool
+    {
+        // Check ownership
+        $stmt = db()->prepare('SELECT user_id FROM plants WHERE id = ?');
+        $stmt->execute([$plantId]);
+        $plant = $stmt->fetch();
+
+        if (!$plant) return false;
+        if ($plant['user_id'] == $userId) return true;
+
+        // Check household access
+        $stmt = db()->prepare('
+            SELECT 1 FROM household_plants hp
+            JOIN household_members hm ON hp.household_id = hm.household_id
+            WHERE hp.plant_id = ? AND hm.user_id = ?
+        ');
+        $stmt->execute([$plantId, $userId]);
+        return (bool)$stmt->fetch();
+    }
+
+    /**
      * Preset action types available to all users
      */
     private array $presetActions = [
@@ -127,10 +150,8 @@ class CareLogController
             return ['status' => 400, 'data' => ['error' => 'Action type is required']];
         }
 
-        // Verify plant ownership
-        $stmt = db()->prepare('SELECT id FROM plants WHERE id = ? AND user_id = ?');
-        $stmt->execute([$plantId, $userId]);
-        if (!$stmt->fetch()) {
+        // Verify plant access (owned or shared via household)
+        if (!$this->canAccessPlant($plantId, $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
         }
 
@@ -152,15 +173,15 @@ class CareLogController
             }
         }
 
-        // Insert care log entry
-        $sql = 'INSERT INTO care_log (plant_id, action, notes, photo_id';
-        $values = [$plantId, $action, $notes ?: null, $photoId];
+        // Insert care log entry with performer attribution
+        $sql = 'INSERT INTO care_log (plant_id, action, notes, photo_id, performed_by_user_id';
+        $values = [$plantId, $action, $notes ?: null, $photoId, $userId];
 
         if ($performedAt) {
-            $sql .= ', performed_at) VALUES (?, ?, ?, ?, ?)';
+            $sql .= ', performed_at) VALUES (?, ?, ?, ?, ?, ?)';
             $values[] = $performedAt;
         } else {
-            $sql .= ') VALUES (?, ?, ?, ?)';
+            $sql .= ') VALUES (?, ?, ?, ?, ?)';
         }
 
         $stmt = db()->prepare($sql);
@@ -168,9 +189,13 @@ class CareLogController
 
         $logId = db()->lastInsertId();
 
-        // Fetch the created entry with photo info
+        // Fetch the created entry with photo info and performer name
         $stmt = db()->prepare('
-            SELECT cl.*, p.filename as photo_filename, p.thumbnail as photo_thumbnail
+            SELECT cl.*, p.filename as photo_filename, p.thumbnail as photo_thumbnail,
+                   CASE WHEN cl.performed_by_user_id IS NOT NULL THEN
+                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, \'@\') - 1))
+                        FROM users u WHERE u.id = cl.performed_by_user_id)
+                   ELSE NULL END as performed_by_name
             FROM care_log cl
             LEFT JOIN photos p ON cl.photo_id = p.id
             WHERE cl.id = ?
@@ -189,15 +214,17 @@ class CareLogController
         $filter = $_GET['filter'] ?? null;
         $limit = min((int)($_GET['limit'] ?? 50), 100);
 
-        // Verify plant ownership
-        $stmt = db()->prepare('SELECT id FROM plants WHERE id = ? AND user_id = ?');
-        $stmt->execute([$plantId, $userId]);
-        if (!$stmt->fetch()) {
+        // Verify plant access (owned or shared via household)
+        if (!$this->canAccessPlant($plantId, $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
         }
 
         $sql = '
-            SELECT cl.*, p.filename as photo_filename, p.thumbnail as photo_thumbnail
+            SELECT cl.*, p.filename as photo_filename, p.thumbnail as photo_thumbnail,
+                   CASE WHEN cl.performed_by_user_id IS NOT NULL THEN
+                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, \'@\') - 1))
+                        FROM users u WHERE u.id = cl.performed_by_user_id)
+                   ELSE NULL END as performed_by_name
             FROM care_log cl
             LEFT JOIN photos p ON cl.photo_id = p.id
             WHERE cl.plant_id = ?

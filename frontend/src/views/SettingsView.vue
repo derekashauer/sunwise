@@ -418,6 +418,23 @@ const galleryUrl = computed(() => {
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
         </svg>
       </router-link>
+      <router-link
+        to="/household"
+        class="flex items-center justify-between p-3 -mx-1 rounded-xl hover:bg-cream-100 transition-colors"
+      >
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-sage-100 rounded-2xl flex items-center justify-center">
+            <img src="https://img.icons8.com/doodle/48/family--v1.png" alt="" class="w-6 h-6">
+          </div>
+          <div>
+            <p class="font-medium text-charcoal-700">Household</p>
+            <p class="text-sm text-charcoal-400">Share plants with family</p>
+          </div>
+        </div>
+        <svg class="w-5 h-5 text-charcoal-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+        </svg>
+      </router-link>
     </div>
 
     <!-- AI Settings -->

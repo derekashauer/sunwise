@@ -31,3 +31,8 @@ logs/
 # Temp files
 *.tmp
 *.temp
+
+# Markdown files (may contain sensitive info)
+*.md
+!CHANGELOG.md
+.claude/

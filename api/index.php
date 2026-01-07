@@ -62,10 +62,15 @@ spl_autoload_register(function ($class) {
 
 // Get request info
 $method = $_SERVER['REQUEST_METHOD'];
-$uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
-// Remove /api prefix if present
-$uri = preg_replace('#^/api#', '', $uri);
+// Check for _route query param (used by .htaccess rewrites for social crawlers)
+if (isset($_GET['_route'])) {
+    $uri = $_GET['_route'];
+} else {
+    $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+    // Remove /api prefix if present
+    $uri = preg_replace('#^/api#', '', $uri);
+}
 $uri = '/' . trim($uri, '/');
 
 // Route definitions
@@ -153,6 +158,10 @@ $routes = [
     // Public gallery view (no auth)
     'GET /gallery/{token}' => ['GalleryController', 'show'],
 
+    // Share pages with OG meta tags (accessed directly via URL, not through SPA)
+    'GET /share/plant/{id}' => ['ShareController', 'plant'],
+    'GET /share/gallery/{token}' => ['ShareController', 'gallery'],
+
     // Pots inventory routes
     'GET /pots' => ['PotController', 'index', true],
     'GET /pots/available' => ['PotController', 'available', true],
@@ -186,6 +195,23 @@ $routes = [
     // Cron routes (no auth, but protected by secret key in query param)
     'GET /cron/daily-reminders' => ['CronController', 'dailyReminders'],
     'GET /cron/test-email' => ['CronController', 'testEmail', true],
+
+    // Household sharing routes
+    'POST /households' => ['HouseholdController', 'create', true],
+    'GET /households' => ['HouseholdController', 'index', true],
+    'GET /households/{id}' => ['HouseholdController', 'show', true],
+    'PUT /households/{id}' => ['HouseholdController', 'update', true],
+    'DELETE /households/{id}' => ['HouseholdController', 'destroy', true],
+    'GET /households/{id}/members' => ['HouseholdController', 'members', true],
+    'DELETE /households/{id}/members/{userId}' => ['HouseholdController', 'removeMember', true],
+    'GET /households/{id}/plants' => ['HouseholdController', 'plants', true],
+    'POST /households/{id}/plants' => ['HouseholdController', 'sharePlants', true],
+    'DELETE /households/{id}/plants/{plantId}' => ['HouseholdController', 'unsharePlant', true],
+    'POST /households/{id}/invite' => ['HouseholdController', 'invite', true],
+    'GET /households/{id}/invitations' => ['HouseholdController', 'invitations', true],
+    'DELETE /invitations/{id}' => ['HouseholdController', 'revokeInvitation', true],
+    'GET /invitations/{token}' => ['HouseholdController', 'getInvitation'],  // No auth - public
+    'POST /invitations/{token}/accept' => ['HouseholdController', 'acceptInvitation', true],
 ];
 
 // Match route

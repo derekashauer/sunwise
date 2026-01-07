@@ -6,35 +6,80 @@
 class TaskController
 {
     /**
+     * Get SQL condition for plants user can access (owned + shared via household)
+     */
+    private function getAccessiblePlantCondition(int $userId): string
+    {
+        $stmt = db()->prepare('SELECT household_id FROM household_members WHERE user_id = ?');
+        $stmt->execute([$userId]);
+        $households = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        if (empty($households)) {
+            return "p.user_id = {$userId}";
+        }
+
+        $householdList = implode(',', array_map('intval', $households));
+        return "(p.user_id = {$userId} OR p.id IN (SELECT plant_id FROM household_plants WHERE household_id IN ({$householdList})))";
+    }
+
+    /**
+     * Check if user can access a specific plant (owns it or has household access)
+     */
+    private function canAccessPlant(int $plantId, int $userId): bool
+    {
+        // Check ownership
+        $stmt = db()->prepare('SELECT user_id FROM plants WHERE id = ?');
+        $stmt->execute([$plantId]);
+        $plant = $stmt->fetch();
+
+        if (!$plant) return false;
+        if ($plant['user_id'] == $userId) return true;
+
+        // Check household access
+        $stmt = db()->prepare('
+            SELECT 1 FROM household_plants hp
+            JOIN household_members hm ON hp.household_id = hm.household_id
+            WHERE hp.plant_id = ? AND hm.user_id = ?
+        ');
+        $stmt->execute([$plantId, $userId]);
+        return (bool)$stmt->fetch();
+    }
+
+    /**
      * Get today's tasks
      */
     public function today(array $params, array $body, ?int $userId): array
     {
         $today = date('Y-m-d');
+        $accessCondition = $this->getAccessiblePlantCondition($userId);
 
-        $stmt = db()->prepare('
+        $stmt = db()->query("
             SELECT t.*,
                    p.name as plant_name,
                    p.location as plant_location,
-                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail
+                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail,
+                   CASE WHEN p.user_id = {$userId} THEN 1 ELSE 0 END as is_owned,
+                   CASE WHEN t.completed_by_user_id IS NOT NULL THEN
+                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1))
+                        FROM users u WHERE u.id = t.completed_by_user_id)
+                   ELSE NULL END as completed_by_name
             FROM tasks t
             JOIN plants p ON t.plant_id = p.id
-            WHERE p.user_id = ?
-              AND t.due_date <= ?
+            WHERE {$accessCondition}
+              AND t.due_date <= '{$today}'
               AND t.skipped_at IS NULL
               AND p.archived_at IS NULL
             ORDER BY
                 CASE WHEN t.completed_at IS NULL THEN 0 ELSE 1 END,
                 CASE t.priority
-                    WHEN "urgent" THEN 1
-                    WHEN "high" THEN 2
-                    WHEN "normal" THEN 3
-                    WHEN "low" THEN 4
+                    WHEN 'urgent' THEN 1
+                    WHEN 'high' THEN 2
+                    WHEN 'normal' THEN 3
+                    WHEN 'low' THEN 4
                     ELSE 5
                 END,
                 t.due_date ASC
-        ');
-        $stmt->execute([$userId, $today]);
+        ");
 
         return ['tasks' => $stmt->fetchAll()];
     }
@@ -46,24 +91,25 @@ class TaskController
     {
         $today = date('Y-m-d');
         $endDate = date('Y-m-d', strtotime('+7 days'));
+        $accessCondition = $this->getAccessiblePlantCondition($userId);
 
-        $stmt = db()->prepare('
+        $stmt = db()->query("
             SELECT t.*,
                    p.name as plant_name,
                    p.location as plant_location,
                    p.species as species,
                    p.pot_size as pot_size,
                    p.soil_type as soil_type,
-                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail
+                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail,
+                   CASE WHEN p.user_id = {$userId} THEN 1 ELSE 0 END as is_owned
             FROM tasks t
             JOIN plants p ON t.plant_id = p.id
-            WHERE p.user_id = ?
-              AND t.due_date BETWEEN ? AND ?
+            WHERE {$accessCondition}
+              AND t.due_date BETWEEN '{$today}' AND '{$endDate}'
               AND t.completed_at IS NULL
               AND t.skipped_at IS NULL
             ORDER BY t.due_date ASC, t.priority ASC
-        ');
-        $stmt->execute([$userId, $today, $endDate]);
+        ");
 
         return ['tasks' => $stmt->fetchAll()];
     }
@@ -75,21 +121,23 @@ class TaskController
     {
         $plantId = $params['id'];
 
-        // Verify plant ownership
-        $stmt = db()->prepare('SELECT id FROM plants WHERE id = ? AND user_id = ?');
-        $stmt->execute([$plantId, $userId]);
-        if (!$stmt->fetch()) {
+        // Verify plant access (owned or shared via household)
+        if (!$this->canAccessPlant($plantId, $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
         }
 
         $stmt = db()->prepare('
-            SELECT *
-            FROM tasks
-            WHERE plant_id = ?
-              AND skipped_at IS NULL
+            SELECT t.*,
+                   CASE WHEN t.completed_by_user_id IS NOT NULL THEN
+                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, \'@\') - 1))
+                        FROM users u WHERE u.id = t.completed_by_user_id)
+                   ELSE NULL END as completed_by_name
+            FROM tasks t
+            WHERE t.plant_id = ?
+              AND t.skipped_at IS NULL
             ORDER BY
-                CASE WHEN completed_at IS NULL THEN 0 ELSE 1 END,
-                due_date ASC
+                CASE WHEN t.completed_at IS NULL THEN 0 ELSE 1 END,
+                t.due_date ASC
             LIMIT 20
         ');
         $stmt->execute([$plantId]);
@@ -105,9 +153,9 @@ class TaskController
         $taskId = $params['id'];
         $notes = $body['notes'] ?? null;
 
-        // Verify task ownership
+        // Get task details
         $stmt = db()->prepare('
-            SELECT t.*, p.user_id
+            SELECT t.*, p.user_id as owner_id
             FROM tasks t
             JOIN plants p ON t.plant_id = p.id
             WHERE t.id = ?
@@ -115,24 +163,30 @@ class TaskController
         $stmt->execute([$taskId]);
         $task = $stmt->fetch();
 
-        if (!$task || $task['user_id'] != $userId) {
+        if (!$task) {
             return ['status' => 404, 'data' => ['error' => 'Task not found']];
         }
 
-        // Mark as completed
-        $stmt = db()->prepare('UPDATE tasks SET completed_at = datetime("now"), notes = ? WHERE id = ?');
-        $stmt->execute([$notes, $taskId]);
+        // Verify access (owned or shared via household)
+        if (!$this->canAccessPlant($task['plant_id'], $userId)) {
+            return ['status' => 404, 'data' => ['error' => 'Task not found']];
+        }
 
-        // Log to care log
+        // Mark as completed with attribution
+        $stmt = db()->prepare('UPDATE tasks SET completed_at = datetime("now"), notes = ?, completed_by_user_id = ? WHERE id = ?');
+        $stmt->execute([$notes, $userId, $taskId]);
+
+        // Log to care log with performer attribution
         $stmt = db()->prepare('
-            INSERT INTO care_log (plant_id, task_id, action, notes)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO care_log (plant_id, task_id, action, notes, performed_by_user_id)
+            VALUES (?, ?, ?, ?, ?)
         ');
         $stmt->execute([
             $task['plant_id'],
             $taskId,
             $task['task_type'],
-            $notes
+            $notes,
+            $userId
         ]);
 
         // Generate next occurrence if recurring
@@ -166,9 +220,9 @@ class TaskController
         $failed = [];
 
         foreach ($taskIds as $taskId) {
-            // Verify task ownership
+            // Get task details
             $stmt = db()->prepare('
-                SELECT t.*, p.user_id
+                SELECT t.*, p.user_id as owner_id
                 FROM tasks t
                 JOIN plants p ON t.plant_id = p.id
                 WHERE t.id = ?
@@ -176,7 +230,7 @@ class TaskController
             $stmt->execute([$taskId]);
             $task = $stmt->fetch();
 
-            if (!$task || $task['user_id'] != $userId) {
+            if (!$task || !$this->canAccessPlant($task['plant_id'], $userId)) {
                 $failed[] = $taskId;
                 continue;
             }
@@ -187,20 +241,21 @@ class TaskController
                 continue;
             }
 
-            // Mark as completed
-            $stmt = db()->prepare('UPDATE tasks SET completed_at = datetime("now"), notes = ? WHERE id = ?');
-            $stmt->execute([$notes, $taskId]);
+            // Mark as completed with attribution
+            $stmt = db()->prepare('UPDATE tasks SET completed_at = datetime("now"), notes = ?, completed_by_user_id = ? WHERE id = ?');
+            $stmt->execute([$notes, $userId, $taskId]);
 
-            // Log to care log
+            // Log to care log with performer attribution
             $stmt = db()->prepare('
-                INSERT INTO care_log (plant_id, task_id, action, notes)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO care_log (plant_id, task_id, action, notes, performed_by_user_id)
+                VALUES (?, ?, ?, ?, ?)
             ');
             $stmt->execute([
                 $task['plant_id'],
                 $taskId,
                 $task['task_type'],
-                $notes
+                $notes,
+                $userId
             ]);
 
             // Generate next occurrence if recurring
@@ -226,9 +281,9 @@ class TaskController
         $taskId = $params['id'];
         $reason = $body['reason'] ?? null;
 
-        // Verify task ownership
+        // Get task details
         $stmt = db()->prepare('
-            SELECT t.*, p.user_id
+            SELECT t.*, p.user_id as owner_id
             FROM tasks t
             JOIN plants p ON t.plant_id = p.id
             WHERE t.id = ?
@@ -236,7 +291,12 @@ class TaskController
         $stmt->execute([$taskId]);
         $task = $stmt->fetch();
 
-        if (!$task || $task['user_id'] != $userId) {
+        if (!$task) {
+            return ['status' => 404, 'data' => ['error' => 'Task not found']];
+        }
+
+        // Verify access (owned or shared via household)
+        if (!$this->canAccessPlant($task['plant_id'], $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Task not found']];
         }
 
@@ -244,17 +304,18 @@ class TaskController
         $stmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
         $stmt->execute([$reason, $taskId]);
 
-        // Log to care log with negative outcome
+        // Log to care log with performer attribution
         $stmt = db()->prepare('
-            INSERT INTO care_log (plant_id, task_id, action, notes, outcome)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO care_log (plant_id, task_id, action, notes, outcome, performed_by_user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
         ');
         $stmt->execute([
             $task['plant_id'],
             $taskId,
             'skipped_' . $task['task_type'],
             $reason,
-            'neutral'
+            'neutral',
+            $userId
         ]);
 
         // Generate next occurrence if recurring
@@ -296,7 +357,12 @@ class TaskController
         $stmt->execute([$taskId]);
         $task = $stmt->fetch();
 
-        if (!$task || $task['user_id'] != $userId) {
+        if (!$task) {
+            return ['status' => 404, 'data' => ['error' => 'Task not found']];
+        }
+
+        // Verify access (owned or shared via household)
+        if (!$this->canAccessPlant($task['plant_id'], $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Task not found']];
         }
 
@@ -726,7 +792,12 @@ Be specific to THIS plant's species ({$task['species']}), current health ({$task
         $stmt->execute([$taskId]);
         $task = $stmt->fetch();
 
-        if (!$task || $task['user_id'] != $userId) {
+        if (!$task) {
+            return ['status' => 404, 'data' => ['error' => 'Task not found']];
+        }
+
+        // Verify access (owned or shared via household)
+        if (!$this->canAccessPlant($task['plant_id'], $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Task not found']];
         }
 
@@ -886,9 +957,9 @@ Consider:
         $reason = $body['reason'] ?? '';
         $adjustment = $body['adjustment'] ?? null;
 
-        // Verify task ownership
+        // Get task details
         $stmt = db()->prepare('
-            SELECT t.*, p.user_id, p.id as plant_id
+            SELECT t.*, p.user_id as owner_id, p.id as plant_id
             FROM tasks t
             JOIN plants p ON t.plant_id = p.id
             WHERE t.id = ?
@@ -896,7 +967,12 @@ Consider:
         $stmt->execute([$taskId]);
         $task = $stmt->fetch();
 
-        if (!$task || $task['user_id'] != $userId) {
+        if (!$task) {
+            return ['status' => 404, 'data' => ['error' => 'Task not found']];
+        }
+
+        // Verify access (owned or shared via household)
+        if (!$this->canAccessPlant($task['plant_id'], $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Task not found']];
         }
 

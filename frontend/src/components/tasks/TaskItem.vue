@@ -242,6 +242,9 @@ async function applyScheduleAdjustment() {
         >
           {{ plant?.name || task.plant_name }}
         </button>
+        <p v-if="task.completed_by_name" class="text-xs text-charcoal-400">
+          Completed by {{ task.completed_by_name }}
+        </p>
       </div>
 
       <!-- Details button -->

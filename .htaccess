@@ -13,10 +13,14 @@ RewriteBase /
 RewriteCond %{REQUEST_URI} ^/api/
 RewriteRule ^api/(.*)$ api/index.php [L,QSA]
 
-# Handle plant share pages for social crawlers
-# Detect social media crawlers and serve share.php for OG meta tags
+# Handle share pages for social crawlers
+# Detect social media crawlers and serve ShareController for OG meta tags
 RewriteCond %{HTTP_USER_AGENT} facebookexternalhit|Facebot|Twitterbot|Pinterest|LinkedInBot|Slackbot|WhatsApp|Telegram|Discordbot|Applebot [NC]
-RewriteRule ^plant/(\d+)$ api/share.php [L]
+RewriteRule ^plant/(\d+)$ api/index.php?_route=/share/plant/$1 [L,QSA]
+
+# Handle gallery share pages for social crawlers
+RewriteCond %{HTTP_USER_AGENT} facebookexternalhit|Facebot|Twitterbot|Pinterest|LinkedInBot|Slackbot|WhatsApp|Telegram|Discordbot|Applebot [NC]
+RewriteRule ^gallery/([a-zA-Z0-9]+)$ api/index.php?_route=/share/gallery/$1 [L,QSA]
 
 # Serve static files directly if they exist
 RewriteCond %{REQUEST_FILENAME} -f

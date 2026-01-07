@@ -6,20 +6,69 @@
 class PlantController
 {
     /**
+     * Get SQL condition for plants user can access (owned + shared via household)
+     */
+    private function getAccessiblePlantIds(int $userId): string
+    {
+        // Get IDs of households user belongs to
+        $stmt = db()->prepare('SELECT household_id FROM household_members WHERE user_id = ?');
+        $stmt->execute([$userId]);
+        $households = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        if (empty($households)) {
+            // User not in any household - only their own plants
+            return "p.user_id = {$userId}";
+        }
+
+        $householdList = implode(',', array_map('intval', $households));
+        return "(p.user_id = {$userId} OR p.id IN (SELECT plant_id FROM household_plants WHERE household_id IN ({$householdList})))";
+    }
+
+    /**
+     * Check if user can access a specific plant (owns it or has household access)
+     */
+    private function canAccessPlant(int $plantId, int $userId): bool
+    {
+        // Check ownership
+        $stmt = db()->prepare('SELECT user_id FROM plants WHERE id = ?');
+        $stmt->execute([$plantId]);
+        $plant = $stmt->fetch();
+
+        if (!$plant) return false;
+        if ($plant['user_id'] == $userId) return true;
+
+        // Check household access
+        $stmt = db()->prepare('
+            SELECT 1 FROM household_plants hp
+            JOIN household_members hm ON hp.household_id = hm.household_id
+            WHERE hp.plant_id = ? AND hm.user_id = ?
+        ');
+        $stmt->execute([$plantId, $userId]);
+        return (bool)$stmt->fetch();
+    }
+
+    /**
      * List all active plants for user (excludes archived)
+     * Includes both owned plants and plants shared via household
      */
     public function index(array $params, array $body, ?int $userId): array
     {
-        $stmt = db()->prepare('
+        $accessCondition = $this->getAccessiblePlantIds($userId);
+
+        $stmt = db()->query("
             SELECT p.*,
                    l.name as location_name,
-                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as thumbnail
+                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as thumbnail,
+                   CASE WHEN p.user_id = {$userId} THEN 1 ELSE 0 END as is_owned,
+                   CASE WHEN p.user_id != {$userId} THEN
+                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1))
+                        FROM users u WHERE u.id = p.user_id)
+                   ELSE NULL END as owner_name
             FROM plants p
             LEFT JOIN locations l ON p.location_id = l.id
-            WHERE p.user_id = ? AND p.archived_at IS NULL
+            WHERE {$accessCondition} AND p.archived_at IS NULL
             ORDER BY p.created_at DESC
-        ');
-        $stmt->execute([$userId]);
+        ");
         $plants = $stmt->fetchAll();
 
         return ['plants' => $plants];
@@ -215,15 +264,25 @@ class PlantController
     {
         $plantId = $params['id'];
 
+        // Check if user can access this plant (owned or shared via household)
+        if (!$this->canAccessPlant($plantId, $userId)) {
+            return ['status' => 404, 'data' => ['error' => 'Plant not found']];
+        }
+
         $stmt = db()->prepare('
             SELECT p.*,
                    l.name as location_name,
-                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as thumbnail
+                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as thumbnail,
+                   CASE WHEN p.user_id = ? THEN 1 ELSE 0 END as is_owned,
+                   CASE WHEN p.user_id != ? THEN
+                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, \'@\') - 1))
+                        FROM users u WHERE u.id = p.user_id)
+                   ELSE NULL END as owner_name
             FROM plants p
             LEFT JOIN locations l ON p.location_id = l.id
-            WHERE p.id = ? AND p.user_id = ?
+            WHERE p.id = ?
         ');
-        $stmt->execute([$plantId, $userId]);
+        $stmt->execute([$userId, $userId, $plantId]);
         $plant = $stmt->fetch();
 
         if (!$plant) {
@@ -245,10 +304,8 @@ class PlantController
     {
         $plantId = $params['id'];
 
-        // Verify ownership
-        $stmt = db()->prepare('SELECT id FROM plants WHERE id = ? AND user_id = ?');
-        $stmt->execute([$plantId, $userId]);
-        if (!$stmt->fetch()) {
+        // Verify access (owned or shared via household)
+        if (!$this->canAccessPlant($plantId, $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
         }
 

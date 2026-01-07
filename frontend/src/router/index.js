@@ -103,6 +103,18 @@ const routes = [
     name: 'completed-tasks',
     component: () => import('@/views/CompletedTasksView.vue'),
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/household',
+    name: 'household',
+    component: () => import('@/views/HouseholdView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/invite/:token',
+    name: 'accept-invite',
+    component: () => import('@/views/InviteAcceptView.vue'),
+    meta: { requiresAuth: false }
   }
 ]
 
