@@ -240,7 +240,7 @@ function formatDate(dateStr) {
   <div class="page-container">
     <div class="flex items-center justify-between mb-6">
       <h1 class="page-title flex items-center gap-2">
-        <img src="https://img.icons8.com/doodle/48/family--v1.png" alt="" class="w-8 h-8">
+        <img src="https://img.icons8.com/doodle/48/home--v1.png" alt="" class="w-8 h-8">
         Household
       </h1>
       <button
@@ -259,7 +259,7 @@ function formatDate(dateStr) {
 
     <!-- No households -->
     <div v-else-if="households.length === 0" class="card p-8 text-center">
-      <img src="https://img.icons8.com/doodle/96/family--v1.png" alt="" class="w-16 h-16 mx-auto mb-4 opacity-50">
+      <img src="https://img.icons8.com/doodle/96/home--v1.png" alt="" class="w-16 h-16 mx-auto mb-4 opacity-50">
       <h2 class="font-hand text-xl text-charcoal-600 mb-2">No Household Yet</h2>
       <p class="text-charcoal-400 mb-6">
         Create a household to share plant care with family members or roommates.

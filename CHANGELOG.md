@@ -2,6 +2,13 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.8.1] - 2026-01-07
+
+### Fixed
+- HouseholdController now properly returns `is_owner` flag for household ownership detection
+- HouseholdController returns `is_self` flag for member list so users can identify themselves
+- Updated household icons to use home icon instead of family icon
+
 ## [0.8.0] - 2026-01-07
 
 ### Added

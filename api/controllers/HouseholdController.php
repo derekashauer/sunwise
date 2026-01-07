@@ -33,7 +33,7 @@ class HouseholdController
         ');
         $stmt->execute([$householdId, $userId, $userId]);
 
-        return $this->getHouseholdResponse($householdId);
+        return $this->getHouseholdResponse($householdId, $userId);
     }
 
     /**
@@ -45,13 +45,14 @@ class HouseholdController
         $stmt = db()->prepare('
             SELECT h.*,
                    hm.role,
+                   (h.owner_id = ?) as is_owner,
                    (SELECT COUNT(*) FROM household_members WHERE household_id = h.id) as member_count,
                    (SELECT COUNT(*) FROM household_plants WHERE household_id = h.id) as plant_count
             FROM households h
             JOIN household_members hm ON h.id = hm.household_id
             WHERE hm.user_id = ?
         ');
-        $stmt->execute([$userId]);
+        $stmt->execute([$userId, $userId]);
 
         return ['households' => $stmt->fetchAll()];
     }
@@ -69,7 +70,7 @@ class HouseholdController
             return ['status' => 404, 'data' => ['error' => 'Household not found']];
         }
 
-        return $this->getHouseholdResponse($householdId);
+        return $this->getHouseholdResponse($householdId, $userId);
     }
 
     /**
@@ -93,7 +94,7 @@ class HouseholdController
         $stmt = db()->prepare('UPDATE households SET name = ? WHERE id = ?');
         $stmt->execute([$name, $householdId]);
 
-        return $this->getHouseholdResponse($householdId);
+        return $this->getHouseholdResponse($householdId, $userId);
     }
 
     /**
@@ -129,13 +130,14 @@ class HouseholdController
 
         $stmt = db()->prepare('
             SELECT hm.id, hm.user_id, hm.role, hm.display_name, hm.joined_at,
-                   u.email
+                   u.email,
+                   (hm.user_id = ?) as is_self
             FROM household_members hm
             JOIN users u ON hm.user_id = u.id
             WHERE hm.household_id = ?
             ORDER BY hm.role = "owner" DESC, hm.joined_at ASC
         ');
-        $stmt->execute([$householdId]);
+        $stmt->execute([$userId, $householdId]);
 
         return ['members' => $stmt->fetchAll()];
     }
@@ -542,16 +544,17 @@ class HouseholdController
         return (bool)$stmt->fetch();
     }
 
-    private function getHouseholdResponse(int $householdId): array
+    private function getHouseholdResponse(int $householdId, ?int $userId = null): array
     {
         $stmt = db()->prepare('
             SELECT h.*,
+                   (h.owner_id = ?) as is_owner,
                    (SELECT COUNT(*) FROM household_members WHERE household_id = h.id) as member_count,
                    (SELECT COUNT(*) FROM household_plants WHERE household_id = h.id) as plant_count
             FROM households h
             WHERE h.id = ?
         ');
-        $stmt->execute([$householdId]);
+        $stmt->execute([$userId, $householdId]);
 
         return ['household' => $stmt->fetch()];
     }

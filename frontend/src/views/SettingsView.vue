@@ -424,7 +424,7 @@ const galleryUrl = computed(() => {
       >
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 bg-sage-100 rounded-2xl flex items-center justify-center">
-            <img src="https://img.icons8.com/doodle/48/family--v1.png" alt="" class="w-6 h-6">
+            <img src="https://img.icons8.com/doodle/48/home--v1.png" alt="" class="w-6 h-6">
           </div>
           <div>
             <p class="font-medium text-charcoal-700">Household</p>

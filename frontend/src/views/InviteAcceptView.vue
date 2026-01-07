@@ -82,7 +82,7 @@ function formatDate(dateStr) {
 
       <!-- Invitation details -->
       <div v-else-if="invitation">
-        <img src="https://img.icons8.com/doodle/96/family--v1.png" alt="" class="w-20 h-20 mx-auto mb-4">
+        <img src="https://img.icons8.com/doodle/96/home--v1.png" alt="" class="w-20 h-20 mx-auto mb-4">
 
         <h1 class="font-hand text-2xl text-charcoal-700 mb-2">You're Invited!</h1>
 
