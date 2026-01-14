@@ -519,4 +519,114 @@ class SettingsController
 
         return $this->getTaskTypes($params, $body, $userId);
     }
+
+    /**
+     * Get AI status and recent usage log
+     * GET /settings/ai/status
+     */
+    public function getAiStatus(array $params, array $body, ?int $userId): array
+    {
+        // Get current settings
+        $settings = $this->getAiSettings($params, $body, $userId);
+
+        // Get recent log entries
+        $stmt = db()->prepare('
+            SELECT action, model, success, error_message, created_at
+            FROM ai_usage_log
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+        ');
+        $stmt->execute([$userId]);
+        $recentLog = $stmt->fetchAll();
+
+        // Get error count in last 24 hours
+        $stmt = db()->prepare('
+            SELECT COUNT(*) as error_count
+            FROM ai_usage_log
+            WHERE user_id = ? AND success = 0 AND created_at > datetime("now", "-24 hours")
+        ');
+        $stmt->execute([$userId]);
+        $errorCount = $stmt->fetch()['error_count'];
+
+        // Determine status
+        $status = 'not_configured';
+        if ($settings['has_claude_key'] || $settings['has_openai_key']) {
+            $status = $errorCount > 0 ? 'error' : 'connected';
+        }
+
+        return [
+            'status' => $status,
+            'error_count_24h' => (int)$errorCount,
+            'recent_log' => $recentLog,
+            'has_claude_key' => $settings['has_claude_key'],
+            'has_openai_key' => $settings['has_openai_key']
+        ];
+    }
+
+    /**
+     * Get paginated AI usage log
+     * GET /settings/ai/log
+     */
+    public function getAiLog(array $params, array $body, ?int $userId): array
+    {
+        $limit = min((int)($_GET['limit'] ?? 50), 100);
+        $offset = (int)($_GET['offset'] ?? 0);
+
+        $stmt = db()->prepare('
+            SELECT action, model, success, error_message, created_at
+            FROM ai_usage_log
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        ');
+        $stmt->execute([$userId, $limit, $offset]);
+        $log = $stmt->fetchAll();
+
+        // Get total count
+        $stmt = db()->prepare('SELECT COUNT(*) as total FROM ai_usage_log WHERE user_id = ?');
+        $stmt->execute([$userId]);
+        $total = $stmt->fetch()['total'];
+
+        return [
+            'log' => $log,
+            'total' => (int)$total,
+            'limit' => $limit,
+            'offset' => $offset
+        ];
+    }
+
+    /**
+     * Test AI connection
+     * POST /settings/ai/test
+     */
+    public function testAiConnection(array $params, array $body, ?int $userId): array
+    {
+        try {
+            $aiService = AIServiceFactory::getForUser($userId);
+            $valid = $aiService->validateApiKey();
+
+            if ($valid) {
+                ClaudeService::logUsage($userId, 'test', true, null, $aiService->getModel());
+                return [
+                    'success' => true,
+                    'message' => 'AI connection successful',
+                    'provider' => $aiService->getProviderName(),
+                    'model' => $aiService->getModel()
+                ];
+            } else {
+                ClaudeService::logUsage($userId, 'test', false, 'API key validation failed');
+                return [
+                    'success' => false,
+                    'message' => 'API key validation failed. Please check your key.'
+                ];
+            }
+        } catch (Exception $e) {
+            ClaudeService::logUsage($userId, 'test', false, $e->getMessage());
+            return [
+                'success' => false,
+                'message' => $e->getMessage()
+            ];
+        }
+    }
 }

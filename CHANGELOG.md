@@ -2,6 +2,31 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.9.0] - 2026-01-14
+
+### Added
+- **Species Care Guides**: Comprehensive care information for each plant species
+  - View detailed care guides from the task list (info icon next to plant name)
+  - Includes light, water, humidity, temperature, soil, and fertilizer requirements
+  - Shows toxicity warnings, common issues, propagation tips, and fun facts
+  - Care guides are generated automatically when adding plants or confirming species
+- **AI Usage Logging**: Track all AI operations with detailed activity log
+  - View AI connection status in Settings (Connected/Error/Not Configured)
+  - See recent AI activity with success/failure indicators
+  - Error count badge for issues in the last 24 hours
+  - Test AI connection button to verify API key validity
+- New API endpoints for AI status monitoring (`/settings/ai/status`, `/settings/ai/log`, `/settings/ai/test`)
+- Species care info endpoint (`/plants/{id}/care-info`)
+
+### Changed
+- Species confirmation is now required when adding plants (removed skip option)
+- Added helpful links to Google Lens and PlantNet for plant identification
+- Improved species picker UI with better guidance for manual entry
+- All AI operations now log success/failure for debugging
+
+### Fixed
+- Care plan generation now properly tracks user attribution for AI logging
+
 ## [0.8.1] - 2026-01-07
 
 ### Fixed

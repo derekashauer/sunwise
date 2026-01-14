@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { useApi } from '@/composables/useApi'
 import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
+import CareInfoModal from '@/components/plants/CareInfoModal.vue'
 
 const router = useRouter()
 
@@ -27,6 +28,7 @@ const notes = ref('')
 // Skip modal state
 const showSkipModal = ref(false)
 const showImageModal = ref(false)
+const showCareInfoModal = ref(false)
 const skipReason = ref('')
 const customSkipReason = ref('')
 const skipping = ref(false)
@@ -236,12 +238,23 @@ async function applyScheduleAdjustment() {
             {{ task.priority }}
           </span>
         </div>
-        <button
-          @click="goToPlant"
-          class="text-sm text-charcoal-400 truncate hover:text-sage-600 hover:underline transition-colors text-left"
-        >
-          {{ plant?.name || task.plant_name }}
-        </button>
+        <div class="flex items-center gap-1">
+          <button
+            @click="goToPlant"
+            class="text-sm text-charcoal-400 truncate hover:text-sage-600 hover:underline transition-colors text-left"
+          >
+            {{ plant?.name || task.plant_name }}
+          </button>
+          <button
+            @click.stop="showCareInfoModal = true"
+            class="p-1 text-charcoal-300 hover:text-plant-600 transition-colors flex-shrink-0"
+            title="View care guide"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </button>
+        </div>
         <p v-if="task.completed_by_name" class="text-xs text-charcoal-400">
           Completed by {{ task.completed_by_name }}
         </p>
@@ -527,5 +540,13 @@ async function applyScheduleAdjustment() {
         </div>
       </div>
     </Teleport>
+
+    <!-- Care Info Modal -->
+    <CareInfoModal
+      :plant-id="plant?.id || task.plant_id"
+      :plant-name="plant?.name || task.plant_name"
+      :visible="showCareInfoModal"
+      @close="showCareInfoModal = false"
+    />
   </div>
 </template>

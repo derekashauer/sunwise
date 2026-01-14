@@ -73,7 +73,7 @@ class PhotoController
         $photoId = db()->lastInsertId();
 
         // Trigger AI health analysis
-        $this->analyzeHealth($plantId, $photoId, $filename);
+        $this->analyzeHealth($plantId, $photoId, $filename, $userId);
 
         $stmt = db()->prepare('SELECT * FROM photos WHERE id = ?');
         $stmt->execute([$photoId]);
@@ -89,7 +89,7 @@ class PhotoController
     /**
      * Analyze plant health from photo
      */
-    private function analyzeHealth(int $plantId, int $photoId, string $filename): void
+    private function analyzeHealth(int $plantId, int $photoId, string $filename, ?int $userId = null): void
     {
         try {
             // Get plant info for context
@@ -103,6 +103,8 @@ class PhotoController
             $result = $claudeService->analyzeHealth($imagePath, $plant);
 
             if ($result) {
+                ClaudeService::logUsage($userId, 'health', true, null, $claudeService->getModel());
+
                 // Update plant health status
                 $stmt = db()->prepare('
                     UPDATE plants
@@ -121,11 +123,12 @@ class PhotoController
                 // Update care plan if health changed significantly
                 if (in_array($result['health_status'] ?? '', ['struggling', 'critical'])) {
                     $carePlanController = new CarePlanController();
-                    $carePlanController->generateCarePlan($plantId);
+                    $carePlanController->generateCarePlan($plantId, $userId);
                 }
             }
         } catch (Exception $e) {
             error_log('Health analysis failed: ' . $e->getMessage());
+            ClaudeService::logUsage($userId, 'health', false, $e->getMessage());
         }
     }
 }

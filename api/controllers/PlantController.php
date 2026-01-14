@@ -235,16 +235,30 @@ class PlantController
                 $stmt = db()->prepare('UPDATE plants SET species_confirmed = 1 WHERE id = ?');
                 $stmt->execute([$plantId]);
 
+                // Generate species care info
+                try {
+                    $claudeService = new ClaudeService();
+                    $careInfo = $claudeService->generateSpeciesCareInfo($body['species']);
+                    if ($careInfo) {
+                        $stmt = db()->prepare('UPDATE plants SET species_care_info = ? WHERE id = ?');
+                        $stmt->execute([json_encode($careInfo), $plantId]);
+                        ClaudeService::logUsage($userId, 'care_info', true, null, $claudeService->getModel());
+                    }
+                } catch (Exception $e) {
+                    error_log('Failed to generate species care info: ' . $e->getMessage());
+                    ClaudeService::logUsage($userId, 'care_info', false, $e->getMessage());
+                }
+
                 // Generate care plan for the manually entered species
                 try {
                     $carePlanController = new CarePlanController();
-                    $carePlanController->generateCarePlan($plantId);
+                    $carePlanController->generateCarePlan($plantId, $userId);
                 } catch (Exception $e) {
                     error_log('Failed to generate care plan: ' . $e->getMessage());
                 }
             } else {
                 // No species entered - trigger AI identification
-                $this->triggerAIIdentification($plantId, $photoId, $imageFilename);
+                $this->triggerAIIdentification($plantId, $photoId, $imageFilename, $userId);
             }
         }
 
@@ -409,6 +423,20 @@ class PlantController
         ');
         $stmt->execute([$species, $plantId]);
 
+        // Generate species care info
+        try {
+            $claudeService = new ClaudeService();
+            $careInfo = $claudeService->generateSpeciesCareInfo($species);
+            if ($careInfo) {
+                $stmt = db()->prepare('UPDATE plants SET species_care_info = ? WHERE id = ?');
+                $stmt->execute([json_encode($careInfo), $plantId]);
+                ClaudeService::logUsage($userId, 'care_info', true, null, $claudeService->getModel());
+            }
+        } catch (Exception $e) {
+            error_log('Failed to generate species care info: ' . $e->getMessage());
+            ClaudeService::logUsage($userId, 'care_info', false, $e->getMessage());
+        }
+
         // Regenerate care plan with confirmed species
         try {
             $carePlanController = new CarePlanController();
@@ -421,9 +449,51 @@ class PlantController
     }
 
     /**
+     * Get species care info for a plant
+     */
+    public function getCareInfo(array $params, array $body, ?int $userId): array
+    {
+        $plantId = $params['id'];
+
+        // Check if user can access this plant
+        if (!$this->canAccessPlant($plantId, $userId)) {
+            return ['status' => 404, 'data' => ['error' => 'Plant not found']];
+        }
+
+        $stmt = db()->prepare('SELECT species, species_care_info FROM plants WHERE id = ?');
+        $stmt->execute([$plantId]);
+        $plant = $stmt->fetch();
+
+        if (!$plant) {
+            return ['status' => 404, 'data' => ['error' => 'Plant not found']];
+        }
+
+        // If no care info exists, generate it now
+        if (empty($plant['species_care_info']) && !empty($plant['species'])) {
+            try {
+                $claudeService = new ClaudeService();
+                $careInfo = $claudeService->generateSpeciesCareInfo($plant['species']);
+                if ($careInfo) {
+                    $stmt = db()->prepare('UPDATE plants SET species_care_info = ? WHERE id = ?');
+                    $stmt->execute([json_encode($careInfo), $plantId]);
+                    ClaudeService::logUsage($userId, 'care_info', true, null, $claudeService->getModel());
+                    return ['care_info' => $careInfo, 'species' => $plant['species']];
+                }
+            } catch (Exception $e) {
+                error_log('Failed to generate species care info: ' . $e->getMessage());
+                ClaudeService::logUsage($userId, 'care_info', false, $e->getMessage());
+                return ['status' => 500, 'data' => ['error' => 'Failed to generate care info: ' . $e->getMessage()]];
+            }
+        }
+
+        $careInfo = $plant['species_care_info'] ? json_decode($plant['species_care_info'], true) : null;
+        return ['care_info' => $careInfo, 'species' => $plant['species']];
+    }
+
+    /**
      * Trigger AI identification (async in future, sync for now)
      */
-    private function triggerAIIdentification(int $plantId, int $photoId, string $filename): void
+    private function triggerAIIdentification(int $plantId, int $photoId, string $filename, ?int $userId = null): void
     {
         try {
             $claudeService = new ClaudeService();
@@ -432,6 +502,9 @@ class PlantController
             $result = $claudeService->identifyPlant($imagePath);
 
             if ($result) {
+                // Log successful identification
+                ClaudeService::logUsage($userId, 'identify', true, null, $claudeService->getModel());
+
                 // Store species candidates if multiple possibilities
                 $candidates = $result['candidates'] ?? null;
                 $candidatesJson = $candidates ? json_encode($candidates) : null;
@@ -456,12 +529,28 @@ class PlantController
                 $stmt = db()->prepare('UPDATE photos SET ai_analysis = ? WHERE id = ?');
                 $stmt->execute([json_encode($result), $photoId]);
 
+                // Generate species care info if species was identified
+                if (!empty($result['species'])) {
+                    try {
+                        $careInfo = $claudeService->generateSpeciesCareInfo($result['species']);
+                        if ($careInfo) {
+                            $stmt = db()->prepare('UPDATE plants SET species_care_info = ? WHERE id = ?');
+                            $stmt->execute([json_encode($careInfo), $plantId]);
+                            ClaudeService::logUsage($userId, 'care_info', true, null, $claudeService->getModel());
+                        }
+                    } catch (Exception $e) {
+                        error_log('Failed to generate species care info: ' . $e->getMessage());
+                        ClaudeService::logUsage($userId, 'care_info', false, $e->getMessage());
+                    }
+                }
+
                 // Generate initial care plan
                 $carePlanController = new CarePlanController();
-                $carePlanController->generateCarePlan($plantId);
+                $carePlanController->generateCarePlan($plantId, $userId);
             }
         } catch (Exception $e) {
             error_log('AI identification failed: ' . $e->getMessage());
+            ClaudeService::logUsage($userId, 'identify', false, $e->getMessage());
         }
     }
 }

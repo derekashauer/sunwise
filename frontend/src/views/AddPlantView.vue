@@ -293,15 +293,6 @@ function selectSpeciesCandidate(species) {
   customSpecies.value = '' // Clear custom input when selecting a candidate
 }
 
-function skipSpeciesSelection() {
-  showSpeciesPicker.value = false
-  if (pendingPlantId.value) {
-    // Show share modal for new plants
-    newPlantForShare.value = { id: pendingPlantId.value, name: form.value.name }
-    showShareModal.value = true
-  }
-}
-
 function getShareUrl() {
   return `${window.location.origin}/plant/${newPlantForShare.value?.id}`
 }
@@ -749,83 +740,105 @@ function skipCarePlanUpdate() {
       <div class="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-auto">
         <div class="p-4 border-b">
           <h2 class="text-lg font-semibold text-gray-900">Confirm Plant Species</h2>
-          <p class="text-sm text-gray-500 mt-1">AI detected possible species. Select one or enter your own.</p>
+          <p class="text-sm text-gray-500 mt-1">Please select or enter the plant species to get personalized care recommendations.</p>
         </div>
 
         <div class="p-4 space-y-2">
-          <div
-            v-for="candidate in speciesCandidates"
-            :key="candidate.species"
-            class="p-3 rounded-xl border-2 transition-all"
-            :class="selectedSpecies === candidate.species && !customSpecies
-              ? 'border-plant-500 bg-plant-50'
-              : 'border-gray-200'"
-          >
-            <button
-              @click="selectSpeciesCandidate(candidate.species)"
-              class="w-full text-left flex items-center justify-between"
+          <!-- AI Candidates -->
+          <div v-if="speciesCandidates.length > 0">
+            <p class="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wide">AI Suggestions</p>
+            <div
+              v-for="candidate in speciesCandidates"
+              :key="candidate.species"
+              class="p-3 rounded-xl border-2 transition-all mb-2"
+              :class="selectedSpecies === candidate.species && !customSpecies
+                ? 'border-plant-500 bg-plant-50'
+                : 'border-gray-200'"
             >
-              <div>
-                <span class="font-medium text-gray-900">{{ candidate.species }}</span>
-                <span class="text-xs text-gray-500 ml-2">{{ Math.round(candidate.confidence * 100) }}%</span>
-              </div>
-              <div
-                v-if="selectedSpecies === candidate.species && !customSpecies"
-                class="w-5 h-5 bg-plant-500 rounded-full flex items-center justify-center"
+              <button
+                @click="selectSpeciesCandidate(candidate.species)"
+                class="w-full text-left flex items-center justify-between"
               >
-                <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+                <div>
+                  <span class="font-medium text-gray-900">{{ candidate.species }}</span>
+                  <span class="text-xs text-gray-500 ml-2">{{ Math.round(candidate.confidence * 100) }}%</span>
+                </div>
+                <div
+                  v-if="selectedSpecies === candidate.species && !customSpecies"
+                  class="w-5 h-5 bg-plant-500 rounded-full flex items-center justify-center"
+                >
+                  <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+              </button>
+              <!-- Google Images link -->
+              <a
+                :href="`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(candidate.species + ' plant')}`"
+                target="_blank"
+                rel="noopener"
+                class="inline-flex items-center gap-1 text-xs text-plant-600 hover:text-plant-700 mt-1"
+                @click.stop
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
-              </div>
-            </button>
-            <!-- Google Images link -->
-            <a
-              :href="`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(candidate.species + ' plant')}`"
-              target="_blank"
-              rel="noopener"
-              class="inline-flex items-center gap-1 text-xs text-plant-600 hover:text-plant-700 mt-1"
-              @click.stop
-            >
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              View images to confirm
-            </a>
+                View images to confirm
+              </a>
+            </div>
           </div>
 
           <!-- Custom species input -->
           <div class="pt-2 border-t mt-3">
-            <label class="block text-sm text-gray-600 mb-1">Or enter a different species:</label>
+            <label class="block text-sm text-gray-600 mb-1">Enter species name:</label>
             <input
               v-model="customSpecies"
               type="text"
               class="input text-sm"
-              placeholder="Type species name..."
+              placeholder="e.g., Monstera deliciosa"
               @input="selectedSpecies = null"
             >
+            <p class="text-xs text-gray-400 mt-1">
+              Not sure? Try searching online or use a plant identification app.
+            </p>
+          </div>
+
+          <!-- Help link -->
+          <div class="bg-blue-50 rounded-xl p-3 border border-blue-100">
+            <p class="text-sm text-blue-800">
+              <span class="font-medium">Need help?</span> Try
+              <a
+                href="https://www.google.com/search?q=identify+my+plant&tbm=isch"
+                target="_blank"
+                rel="noopener"
+                class="underline"
+              >Google Lens</a> or
+              <a
+                href="https://identify.plantnet.org/"
+                target="_blank"
+                rel="noopener"
+                class="underline"
+              >PlantNet</a> for identification.
+            </p>
           </div>
         </div>
 
-        <div class="p-4 border-t flex gap-2">
-          <button
-            @click="skipSpeciesSelection"
-            class="btn-secondary flex-1"
-            :disabled="confirmingSpecies"
-          >
-            Skip
-          </button>
+        <div class="p-4 border-t">
           <button
             @click="confirmSpecies"
             :disabled="(!selectedSpecies && !customSpecies.trim()) || confirmingSpecies"
-            class="btn-primary flex-1"
+            class="btn-primary w-full"
             :class="{ 'opacity-50 cursor-not-allowed': (!selectedSpecies && !customSpecies.trim()) || confirmingSpecies }"
           >
             <span v-if="confirmingSpecies" class="flex items-center justify-center gap-2">
               <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
               Confirming...
             </span>
-            <span v-else>Confirm</span>
+            <span v-else>Confirm Species</span>
           </button>
+          <p v-if="!selectedSpecies && !customSpecies.trim()" class="text-xs text-center text-gray-400 mt-2">
+            Select or enter a species to continue
+          </p>
         </div>
       </div>
     </div>

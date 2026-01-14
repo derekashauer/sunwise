@@ -101,7 +101,7 @@ class CarePlanController
     /**
      * Generate care plan using AI
      */
-    public function generateCarePlan(int $plantId): ?array
+    public function generateCarePlan(int $plantId, ?int $userId = null): ?array
     {
         // Get plant details
         $stmt = db()->prepare('SELECT * FROM plants WHERE id = ?');
@@ -163,8 +163,10 @@ class CarePlanController
         try {
             $claudeService = new ClaudeService();
             $aiPlan = $claudeService->generateCarePlan($plant, $careLog, $season);
+            ClaudeService::logUsage($userId ?? $plant['user_id'], 'care_plan', true, null, $claudeService->getModel());
         } catch (Exception $e) {
             error_log('AI care plan generation failed: ' . $e->getMessage());
+            ClaudeService::logUsage($userId ?? $plant['user_id'], 'care_plan', false, $e->getMessage());
             $aiPlan = $this->getDefaultCarePlan($plant, $season);
         }
 

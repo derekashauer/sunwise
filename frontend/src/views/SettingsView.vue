@@ -53,6 +53,12 @@ const taskTypes = ref([])
 const taskTypesLoading = ref(true)
 const savingTaskTypes = ref(false)
 
+// AI Status
+const aiStatus = ref(null)
+const aiStatusLoading = ref(false)
+const showAiLog = ref(false)
+const testingConnection = ref(false)
+
 onMounted(async () => {
   if ('Notification' in window && Notification.permission === 'granted') {
     notificationsEnabled.value = true
@@ -61,7 +67,8 @@ onMounted(async () => {
     loadAiSettings(),
     loadNotificationSettings(),
     loadGallerySettings(),
-    loadTaskTypes()
+    loadTaskTypes(),
+    loadAiStatus()
   ])
 })
 
@@ -121,6 +128,57 @@ async function loadTaskTypes() {
   } finally {
     taskTypesLoading.value = false
   }
+}
+
+async function loadAiStatus() {
+  aiStatusLoading.value = true
+  try {
+    aiStatus.value = await api.get('/settings/ai/status')
+  } catch (e) {
+    console.error('Failed to load AI status:', e)
+  } finally {
+    aiStatusLoading.value = false
+  }
+}
+
+async function testAiConnection() {
+  testingConnection.value = true
+  try {
+    const response = await api.post('/settings/ai/test')
+    if (response.success) {
+      window.$toast?.success(`AI connected: ${response.provider} (${response.model})`)
+    } else {
+      window.$toast?.error(response.message || 'Connection failed')
+    }
+    await loadAiStatus()
+  } catch (e) {
+    window.$toast?.error(e.message || 'Connection test failed')
+  } finally {
+    testingConnection.value = false
+  }
+}
+
+function formatAiAction(action) {
+  const actions = {
+    'identify': 'Plant ID',
+    'care_plan': 'Care Plan',
+    'health': 'Health Check',
+    'chat': 'Chat',
+    'care_info': 'Care Guide',
+    'test': 'Connection Test'
+  }
+  return actions[action] || action
+}
+
+function formatRelativeTime(dateStr) {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diff = Math.floor((now - date) / 1000)
+
+  if (diff < 60) return 'Just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return date.toLocaleDateString()
 }
 
 async function toggleTaskType(taskType) {
@@ -644,6 +702,86 @@ const galleryUrl = computed(() => {
                 console.anthropic.com
               </a>
             </p>
+          </div>
+        </div>
+
+        <!-- AI Status & Activity Log -->
+        <div class="pt-3 border-t border-cream-200">
+          <div class="flex items-center justify-between mb-3">
+            <p class="text-sm font-medium text-charcoal-600">AI Status</p>
+            <div class="flex items-center gap-2">
+              <!-- Status badge -->
+              <span
+                class="px-2 py-1 text-xs font-medium rounded-full"
+                :class="{
+                  'bg-sage-100 text-sage-700': aiStatus?.status === 'connected',
+                  'bg-terracotta-100 text-terracotta-700': aiStatus?.status === 'error',
+                  'bg-charcoal-100 text-charcoal-500': aiStatus?.status === 'not_configured'
+                }"
+              >
+                {{ aiStatus?.status === 'connected' ? 'Connected' : aiStatus?.status === 'error' ? 'Error' : 'Not Configured' }}
+              </span>
+              <button
+                @click="testAiConnection"
+                :disabled="testingConnection || (!aiSettings?.has_claude_key && !aiSettings?.has_openai_key)"
+                class="text-xs text-sage-600 hover:underline disabled:opacity-50 disabled:no-underline"
+              >
+                <span v-if="testingConnection" class="flex items-center gap-1">
+                  <div class="w-3 h-3 border-2 border-sage-500 border-t-transparent rounded-full animate-spin"></div>
+                </span>
+                <span v-else>Test</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Error Warning -->
+          <div v-if="aiStatus?.error_count_24h > 0" class="mb-3 p-2 bg-terracotta-50 rounded-lg border border-terracotta-200">
+            <p class="text-xs text-terracotta-700">
+              {{ aiStatus.error_count_24h }} error(s) in the last 24 hours
+            </p>
+          </div>
+
+          <!-- Activity Log Toggle -->
+          <button
+            @click="showAiLog = !showAiLog"
+            class="w-full flex items-center justify-between p-2 -mx-2 rounded-lg hover:bg-cream-100 transition-colors"
+          >
+            <span class="text-sm text-charcoal-600">Recent Activity</span>
+            <svg class="w-4 h-4 text-charcoal-400 transition-transform" :class="{ 'rotate-180': showAiLog }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          <!-- Activity Log -->
+          <div v-if="showAiLog" class="mt-2 space-y-1 max-h-48 overflow-y-auto">
+            <div v-if="!aiStatus?.recent_log?.length" class="text-xs text-charcoal-400 text-center py-3">
+              No recent AI activity
+            </div>
+            <div
+              v-for="(log, index) in aiStatus?.recent_log"
+              :key="index"
+              class="flex items-center justify-between py-1.5 px-2 text-xs rounded-lg"
+              :class="log.success ? 'bg-cream-50' : 'bg-terracotta-50'"
+            >
+              <div class="flex items-center gap-2">
+                <span
+                  class="w-1.5 h-1.5 rounded-full"
+                  :class="log.success ? 'bg-sage-500' : 'bg-terracotta-500'"
+                ></span>
+                <span class="font-medium" :class="log.success ? 'text-charcoal-600' : 'text-terracotta-700'">
+                  {{ formatAiAction(log.action) }}
+                </span>
+                <span v-if="log.model" class="text-charcoal-400">
+                  {{ log.model.split('-').slice(0, 2).join('-') }}
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span v-if="!log.success && log.error_message" class="text-terracotta-600 truncate max-w-[100px]" :title="log.error_message">
+                  {{ log.error_message.substring(0, 20) }}...
+                </span>
+                <span class="text-charcoal-400">{{ formatRelativeTime(log.created_at) }}</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

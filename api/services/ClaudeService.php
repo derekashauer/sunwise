@@ -521,6 +521,110 @@ INST;
     }
 
     /**
+     * Generate species care info sheet
+     */
+    public function generateSpeciesCareInfo(string $species): ?array
+    {
+        $prompt = <<<PROMPT
+Generate a comprehensive care guide for: {$species}
+
+Provide general species information that would help someone care for this plant. This should be reference information, not personalized to a specific plant.
+
+Respond ONLY with valid JSON in this exact format:
+{
+    "common_name": "Common name of the plant",
+    "scientific_name": "Scientific/botanical name",
+    "family": "Plant family (e.g., Araceae)",
+    "origin": "Native region/habitat",
+    "light": {
+        "ideal": "Description of ideal light conditions",
+        "tolerance": "What light levels it can tolerate",
+        "signs_of_too_much": "Signs of too much light",
+        "signs_of_too_little": "Signs of insufficient light"
+    },
+    "water": {
+        "frequency": "General watering frequency",
+        "method": "Best watering method",
+        "signs_of_overwatering": "Signs of overwatering",
+        "signs_of_underwatering": "Signs of underwatering"
+    },
+    "humidity": {
+        "ideal": "Ideal humidity percentage or description",
+        "tips": "How to increase humidity if needed"
+    },
+    "temperature": {
+        "ideal_range": "Ideal temperature range",
+        "minimum": "Minimum safe temperature",
+        "maximum": "Maximum safe temperature"
+    },
+    "soil": {
+        "type": "Best soil type/mix",
+        "drainage": "Drainage requirements"
+    },
+    "fertilizer": {
+        "type": "Best fertilizer type",
+        "frequency": "How often to fertilize",
+        "season": "Best season to fertilize"
+    },
+    "toxicity": {
+        "toxic_to_pets": true,
+        "toxic_to_humans": false,
+        "details": "Specific toxicity information"
+    },
+    "common_issues": [
+        {
+            "issue": "Name of common issue",
+            "cause": "What causes it",
+            "solution": "How to fix it"
+        }
+    ],
+    "propagation": {
+        "methods": ["List of propagation methods"],
+        "difficulty": "easy|moderate|difficult",
+        "tips": "Propagation tips"
+    },
+    "growth": {
+        "rate": "slow|moderate|fast",
+        "mature_size": "Expected mature size",
+        "lifespan": "Expected lifespan"
+    },
+    "care_tips": ["List of general care tips"],
+    "fun_facts": ["Optional interesting facts about the plant"]
+}
+PROMPT;
+
+        $response = $this->sendRequest([
+            ['type' => 'text', 'text' => $prompt]
+        ], 2048);
+
+        return $this->parseJsonResponse($response);
+    }
+
+    /**
+     * Log AI usage to database
+     */
+    public static function logUsage(?int $userId, string $action, bool $success = true, ?string $errorMessage = null, ?string $model = null): void
+    {
+        if (!$userId) return;
+
+        try {
+            $stmt = db()->prepare('
+                INSERT INTO ai_usage_log (user_id, action, model, success, error_message)
+                VALUES (?, ?, ?, ?, ?)
+            ');
+            $stmt->execute([
+                $userId,
+                $action,
+                $model,
+                $success ? 1 : 0,
+                $errorMessage
+            ]);
+        } catch (Exception $e) {
+            error_log('Failed to log AI usage: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Parse JSON from Claude response
      */
     private function parseJsonResponse(?string $response): ?array

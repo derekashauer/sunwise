@@ -141,6 +141,9 @@ $routes = [
     'DELETE /settings/ai/openai-key' => ['SettingsController', 'removeOpenAIKey', true],
     'PUT /settings/ai/default-provider' => ['SettingsController', 'setDefaultProvider', true],
     'PUT /settings/ai/model' => ['SettingsController', 'setAiModel', true],
+    'GET /settings/ai/status' => ['SettingsController', 'getAiStatus', true],
+    'GET /settings/ai/log' => ['SettingsController', 'getAiLog', true],
+    'POST /settings/ai/test' => ['SettingsController', 'testAiConnection', true],
 
     // Task type settings routes
     'GET /settings/task-types' => ['SettingsController', 'getTaskTypes', true],
@@ -172,8 +175,9 @@ $routes = [
     'POST /pots/{id}/photo' => ['PotController', 'uploadPhoto', true],
     'POST /pots/{id}/assign' => ['PotController', 'assign', true],
 
-    // Species confirmation
+    // Species confirmation and care info
     'POST /plants/{id}/confirm-species' => ['PlantController', 'confirmSpecies', true],
+    'GET /plants/{id}/care-info' => ['PlantController', 'getCareInfo', true],
 
     // Care log routes
     'GET /plants/{id}/care-log' => ['CareLogController', 'index', true],

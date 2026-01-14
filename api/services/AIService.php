@@ -56,6 +56,13 @@ interface AIServiceInterface
      * @return bool True if key is valid
      */
     public function validateApiKey(): bool;
+
+    /**
+     * Get the model name being used
+     *
+     * @return string Model identifier
+     */
+    public function getModel(): string;
 }
 
 /**

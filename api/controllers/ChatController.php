@@ -58,6 +58,7 @@ class ChatController
 
             // Send chat request
             $response = $aiService->chat($plant, $history, $context);
+            ClaudeService::logUsage($userId, 'chat', true, null, $aiService->getModel());
 
             // Save user message to database
             $stmt = db()->prepare('
@@ -86,6 +87,7 @@ class ChatController
                 'provider' => $usedProvider
             ];
         } catch (Exception $e) {
+            ClaudeService::logUsage($userId, 'chat', false, $e->getMessage());
             return ['status' => 500, 'data' => ['error' => $e->getMessage()]];
         }
     }

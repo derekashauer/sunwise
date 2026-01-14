@@ -20,16 +20,35 @@ async function loadPlant() {
 
   try {
     const plantId = route.params.id
-    const response = await fetch(`/api/plants/share/${plantId}`)
-    const data = await response.json()
+
+    if (!plantId) {
+      throw new Error('Plant ID not provided')
+    }
+
+    // Use absolute URL to avoid any routing issues
+    const baseUrl = window.location.origin
+    const response = await fetch(`${baseUrl}/api/plants/share/${plantId}`, {
+      headers: {
+        'Accept': 'application/json',
+        'Cache-Control': 'no-cache'
+      }
+    })
 
     if (!response.ok) {
-      throw new Error(data.error || 'Plant not found')
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data.error || `Failed to load plant (${response.status})`)
+    }
+
+    const data = await response.json()
+
+    if (!data.plant) {
+      throw new Error('Plant data not found in response')
     }
 
     plant.value = data.plant
-    ownerName.value = data.owner_name
+    ownerName.value = data.owner_name || 'Anonymous'
   } catch (e) {
+    console.error('PlantShareView error:', e)
     error.value = e.message || 'Failed to load plant'
   } finally {
     loading.value = false
