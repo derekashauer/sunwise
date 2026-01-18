@@ -171,11 +171,85 @@ class ChatController
                     return ['success' => true, 'updated_field' => 'health_status', 'new_value' => $action['new']];
 
                 case 'update_care_schedule':
-                    // This would require more complex logic to update tasks
-                    // For now, regenerate the care plan
-                    $carePlanController = new CarePlanController();
-                    $carePlanController->generateCarePlan($plantId);
-                    return ['success' => true, 'updated_field' => 'care_schedule', 'message' => 'Care plan regenerated'];
+                    // Update specific care schedule based on AI suggestion
+                    $updates = $action['updates'] ?? [];
+                    $updatedTasks = [];
+
+                    // Handle frequency updates for specific task types
+                    if (!empty($action['task_type']) && !empty($action['frequency_days'])) {
+                        $taskType = $action['task_type'];
+                        $frequencyDays = (int)$action['frequency_days'];
+
+                        // Update recurrence for all pending tasks of this type
+                        $newRecurrence = json_encode(['type' => 'days', 'interval' => $frequencyDays]);
+                        $stmt = db()->prepare('
+                            UPDATE tasks
+                            SET recurrence = ?
+                            WHERE plant_id = ? AND task_type = ? AND completed_at IS NULL AND skipped_at IS NULL
+                        ');
+                        $stmt->execute([$newRecurrence, $plantId, $taskType]);
+
+                        // Update care plan frequency field if it exists
+                        $carePlanField = $taskType . '_frequency_days';
+                        try {
+                            $stmt = db()->prepare("
+                                UPDATE care_plans
+                                SET $carePlanField = ?, updated_at = datetime('now')
+                                WHERE plant_id = ? AND is_active = 1
+                            ");
+                            $stmt->execute([$frequencyDays, $plantId]);
+                        } catch (\Exception $e) {
+                            // Field might not exist in care_plans, ignore
+                        }
+
+                        // Reschedule the next occurrence of this task type
+                        $stmt = db()->prepare('
+                            SELECT id, due_date FROM tasks
+                            WHERE plant_id = ? AND task_type = ? AND completed_at IS NULL AND skipped_at IS NULL
+                            ORDER BY due_date ASC LIMIT 1
+                        ');
+                        $stmt->execute([$plantId, $taskType]);
+                        $nextTask = $stmt->fetch();
+
+                        // If no pending task exists for this type, create one
+                        if (!$nextTask) {
+                            $stmt = db()->prepare('SELECT id FROM care_plans WHERE plant_id = ? AND is_active = 1 LIMIT 1');
+                            $stmt->execute([$plantId]);
+                            $carePlan = $stmt->fetch();
+
+                            if ($carePlan) {
+                                $stmt = db()->prepare('
+                                    INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, priority)
+                                    VALUES (?, ?, ?, ?, ?, ?)
+                                ');
+                                $stmt->execute([
+                                    $carePlan['id'],
+                                    $plantId,
+                                    $taskType,
+                                    date('Y-m-d'),
+                                    $newRecurrence,
+                                    'normal'
+                                ]);
+                            }
+                        }
+
+                        $updatedTasks[] = "$taskType: every $frequencyDays days";
+                    }
+
+                    // If AI suggested regenerating the whole care plan
+                    if (!empty($action['regenerate']) || empty($action['task_type'])) {
+                        $carePlanController = new CarePlanController();
+                        $carePlanController->generateCarePlan($plantId, $userId);
+                        return ['success' => true, 'updated_field' => 'care_schedule', 'message' => 'Care plan regenerated with updated schedule'];
+                    }
+
+                    return [
+                        'success' => true,
+                        'updated_field' => 'care_schedule',
+                        'message' => count($updatedTasks) > 0
+                            ? 'Schedule updated: ' . implode(', ', $updatedTasks)
+                            : 'Care plan regenerated'
+                    ];
 
                 default:
                     return ['status' => 400, 'data' => ['error' => 'Unknown action type: ' . $action['type']]];

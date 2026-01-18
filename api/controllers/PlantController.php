@@ -199,23 +199,45 @@ class PlantController
             }
         }
 
+        // Determine species - inherit from parent if propagation and no species provided
+        $species = $body['species'] ?? null;
+        $speciesConfirmed = false;
+        $speciesCareInfo = null;
+        $parentPlantId = $body['parent_plant_id'] ?? null;
+        $isPropagation = $body['is_propagation'] ?? 0;
+
+        if ($isPropagation && $parentPlantId && empty($species)) {
+            // Inherit species from parent plant
+            $stmt = db()->prepare('SELECT species, species_care_info FROM plants WHERE id = ? AND user_id = ?');
+            $stmt->execute([$parentPlantId, $userId]);
+            $parentPlant = $stmt->fetch();
+
+            if ($parentPlant && !empty($parentPlant['species'])) {
+                $species = $parentPlant['species'];
+                $speciesConfirmed = true;  // Inherited species is confirmed
+                $speciesCareInfo = $parentPlant['species_care_info'];
+            }
+        }
+
         // Insert plant
         $stmt = db()->prepare('
-            INSERT INTO plants (user_id, name, species, pot_size, soil_type, light_condition, location_id, notes, parent_plant_id, propagation_date, is_propagation, has_grow_light, grow_light_hours)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO plants (user_id, name, species, species_confirmed, species_care_info, pot_size, soil_type, light_condition, location_id, notes, parent_plant_id, propagation_date, is_propagation, has_grow_light, grow_light_hours)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ');
         $stmt->execute([
             $userId,
             $name,
-            $body['species'] ?? null,
+            $species,
+            $speciesConfirmed ? 1 : 0,
+            $speciesCareInfo,
             $body['pot_size'] ?? 'medium',
             $body['soil_type'] ?? 'standard',
             $body['light_condition'] ?? 'medium',
             $body['location_id'] ?? null,
             $body['notes'] ?? null,
-            $body['parent_plant_id'] ?? null,
+            $parentPlantId,
             $body['propagation_date'] ?? null,
-            $body['is_propagation'] ?? 0,
+            $isPropagation,
             $body['has_grow_light'] ?? 0,
             $body['grow_light_hours'] ?? null
         ]);
@@ -228,28 +250,35 @@ class PlantController
             $stmt->execute([$plantId, $imageFilename]);
             $photoId = db()->lastInsertId();
 
-            // Only trigger AI identification if species wasn't manually entered
+            // Determine if we need AI identification
+            // Skip AI if: species was manually entered OR species was inherited from parent
             $speciesProvided = !empty(trim($body['species'] ?? ''));
-            if ($speciesProvided) {
-                // Species was manually entered - mark as confirmed and generate care plan
-                $stmt = db()->prepare('UPDATE plants SET species_confirmed = 1 WHERE id = ?');
-                $stmt->execute([$plantId]);
+            $speciesInherited = $speciesConfirmed && !empty($species);
 
-                // Generate species care info
-                try {
-                    $claudeService = new ClaudeService();
-                    $careInfo = $claudeService->generateSpeciesCareInfo($body['species']);
-                    if ($careInfo) {
-                        $stmt = db()->prepare('UPDATE plants SET species_care_info = ? WHERE id = ?');
-                        $stmt->execute([json_encode($careInfo), $plantId]);
-                        ClaudeService::logUsage($userId, 'care_info', true, null, $claudeService->getModel());
+            if ($speciesProvided || $speciesInherited) {
+                // Species is known - don't need AI identification
+                // Just generate care plan if not already done
+                if (!$speciesInherited) {
+                    // Species was manually entered - mark as confirmed
+                    $stmt = db()->prepare('UPDATE plants SET species_confirmed = 1 WHERE id = ?');
+                    $stmt->execute([$plantId]);
+
+                    // Generate species care info (only if not inherited)
+                    try {
+                        $claudeService = new ClaudeService();
+                        $careInfo = $claudeService->generateSpeciesCareInfo($species);
+                        if ($careInfo) {
+                            $stmt = db()->prepare('UPDATE plants SET species_care_info = ? WHERE id = ?');
+                            $stmt->execute([json_encode($careInfo), $plantId]);
+                            ClaudeService::logUsage($userId, 'care_info', true, null, $claudeService->getModel());
+                        }
+                    } catch (Exception $e) {
+                        error_log('Failed to generate species care info: ' . $e->getMessage());
+                        ClaudeService::logUsage($userId, 'care_info', false, $e->getMessage());
                     }
-                } catch (Exception $e) {
-                    error_log('Failed to generate species care info: ' . $e->getMessage());
-                    ClaudeService::logUsage($userId, 'care_info', false, $e->getMessage());
                 }
 
-                // Generate care plan for the manually entered species
+                // Generate care plan for the known species
                 try {
                     $carePlanController = new CarePlanController();
                     $carePlanController->generateCarePlan($plantId, $userId);
@@ -257,7 +286,7 @@ class PlantController
                     error_log('Failed to generate care plan: ' . $e->getMessage());
                 }
             } else {
-                // No species entered - trigger AI identification
+                // No species entered or inherited - trigger AI identification
                 $this->triggerAIIdentification($plantId, $photoId, $imageFilename, $userId);
             }
         }
@@ -496,14 +525,15 @@ class PlantController
     private function triggerAIIdentification(int $plantId, int $photoId, string $filename, ?int $userId = null): void
     {
         try {
-            $claudeService = new ClaudeService();
+            // Use AIServiceFactory to get user's configured AI service
+            $aiService = AIServiceFactory::getForUser($userId);
             $imagePath = UPLOAD_PATH . '/plants/' . $filename;
 
-            $result = $claudeService->identifyPlant($imagePath);
+            $result = $aiService->identifyPlant($imagePath);
 
             if ($result) {
                 // Log successful identification
-                ClaudeService::logUsage($userId, 'identify', true, null, $claudeService->getModel());
+                ClaudeService::logUsage($userId, 'identify', true, null, $aiService->getModel());
 
                 // Store species candidates if multiple possibilities
                 $candidates = $result['candidates'] ?? null;
@@ -532,11 +562,11 @@ class PlantController
                 // Generate species care info if species was identified
                 if (!empty($result['species'])) {
                     try {
-                        $careInfo = $claudeService->generateSpeciesCareInfo($result['species']);
+                        $careInfo = $aiService->generateSpeciesCareInfo($result['species']);
                         if ($careInfo) {
                             $stmt = db()->prepare('UPDATE plants SET species_care_info = ? WHERE id = ?');
                             $stmt->execute([json_encode($careInfo), $plantId]);
-                            ClaudeService::logUsage($userId, 'care_info', true, null, $claudeService->getModel());
+                            ClaudeService::logUsage($userId, 'care_info', true, null, $aiService->getModel());
                         }
                     } catch (Exception $e) {
                         error_log('Failed to generate species care info: ' . $e->getMessage());
@@ -547,6 +577,10 @@ class PlantController
                 // Generate initial care plan
                 $carePlanController = new CarePlanController();
                 $carePlanController->generateCarePlan($plantId, $userId);
+            } else {
+                // AI returned no result - log the failure
+                ClaudeService::logUsage($userId, 'identify', false, 'AI returned no identification result');
+                error_log('AI identification returned no result for plant ' . $plantId);
             }
         } catch (Exception $e) {
             error_log('AI identification failed: ' . $e->getMessage());

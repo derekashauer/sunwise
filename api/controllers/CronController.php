@@ -92,6 +92,9 @@ class CronController
             }
         }
 
+        // Log the cron run
+        $this->logCronRun('daily_reminders', $sent, $skipped, $errors);
+
         return [
             'success' => true,
             'date' => $today,
@@ -100,6 +103,41 @@ class CronController
             'skipped' => $skipped,
             'errors' => $errors
         ];
+    }
+
+    /**
+     * Log a cron job run
+     */
+    private function logCronRun(string $jobName, int $processed, int $skipped, array $errors): void
+    {
+        try {
+            // Create table if it doesn't exist
+            db()->exec('
+                CREATE TABLE IF NOT EXISTS cron_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_name TEXT NOT NULL,
+                    ran_at TEXT DEFAULT (datetime("now")),
+                    processed INTEGER DEFAULT 0,
+                    skipped INTEGER DEFAULT 0,
+                    errors TEXT,
+                    success INTEGER DEFAULT 1
+                )
+            ');
+
+            $stmt = db()->prepare('
+                INSERT INTO cron_log (job_name, processed, skipped, errors, success)
+                VALUES (?, ?, ?, ?, ?)
+            ');
+            $stmt->execute([
+                $jobName,
+                $processed,
+                $skipped,
+                !empty($errors) ? json_encode($errors) : null,
+                empty($errors) ? 1 : 0
+            ]);
+        } catch (Exception $e) {
+            error_log('Failed to log cron run: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -168,14 +206,121 @@ class CronController
     }
 
     /**
-     * Test endpoint - send a test email to current user
-     * GET /cron/test-email
-     * Requires authentication
+     * Get cron job status
+     * GET /cron/status
+     * Requires authentication (for dashboard display)
      */
-    public function testEmail(array $params, array $body, ?int $userId): array
+    public function status(array $params, array $body, ?int $userId): array
     {
         if (!$userId) {
             return ['status' => 401, 'data' => ['error' => 'Authentication required']];
+        }
+
+        // Create table if it doesn't exist (in case cron never ran)
+        try {
+            db()->exec('
+                CREATE TABLE IF NOT EXISTS cron_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_name TEXT NOT NULL,
+                    ran_at TEXT DEFAULT (datetime("now")),
+                    processed INTEGER DEFAULT 0,
+                    skipped INTEGER DEFAULT 0,
+                    errors TEXT,
+                    success INTEGER DEFAULT 1
+                )
+            ');
+        } catch (Exception $e) {
+            // Table might already exist
+        }
+
+        // Get last run for each job type
+        $stmt = db()->query('
+            SELECT job_name, ran_at, processed, skipped, errors, success
+            FROM cron_log
+            WHERE id IN (
+                SELECT MAX(id) FROM cron_log GROUP BY job_name
+            )
+            ORDER BY ran_at DESC
+        ');
+        $lastRuns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Get recent runs (last 24 hours)
+        $stmt = db()->query('
+            SELECT job_name, ran_at, processed, skipped, errors, success
+            FROM cron_log
+            WHERE ran_at > datetime("now", "-24 hours")
+            ORDER BY ran_at DESC
+            LIMIT 10
+        ');
+        $recentRuns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Determine status
+        $status = 'not_configured';
+        $statusMessage = 'Cron jobs have never run. Make sure the cron job is configured on the server.';
+        $lastDailyReminder = null;
+
+        foreach ($lastRuns as $run) {
+            if ($run['job_name'] === 'daily_reminders') {
+                $lastDailyReminder = $run;
+                break;
+            }
+        }
+
+        if ($lastDailyReminder) {
+            $lastRunTime = strtotime($lastDailyReminder['ran_at']);
+            $hoursSinceRun = (time() - $lastRunTime) / 3600;
+
+            if ($hoursSinceRun > 48) {
+                $status = 'error';
+                $statusMessage = 'Daily reminder cron has not run in over 48 hours. Check server configuration.';
+            } elseif ($hoursSinceRun > 25) {
+                $status = 'warning';
+                $statusMessage = 'Daily reminder cron has not run in over 25 hours. It should run daily.';
+            } else {
+                $status = 'ok';
+                $statusMessage = 'Cron jobs are running normally.';
+            }
+        }
+
+        return [
+            'status' => $status,
+            'status_message' => $statusMessage,
+            'last_runs' => $lastRuns,
+            'recent_runs' => $recentRuns,
+            'last_daily_reminder' => $lastDailyReminder ? [
+                'ran_at' => $lastDailyReminder['ran_at'],
+                'emails_sent' => (int)$lastDailyReminder['processed'],
+                'skipped' => (int)$lastDailyReminder['skipped'],
+                'success' => (bool)$lastDailyReminder['success']
+            ] : null
+        ];
+    }
+
+    /**
+     * Test endpoint - send a test email to a specific user
+     * GET /cron/test-email?key=SECRET&email=user@example.com
+     * Protected by cron key (for testing via URL)
+     */
+    public function testEmail(array $params, array $body, ?int $userId): array
+    {
+        // Allow either JWT auth OR cron key auth
+        if (!$userId && !$this->validateCronKey($params)) {
+            return ['status' => 401, 'data' => ['error' => 'Authentication required']];
+        }
+
+        // If using cron key, get user by email param
+        if (!$userId) {
+            $email = $_GET['email'] ?? null;
+            if (!$email) {
+                return ['status' => 400, 'data' => ['error' => 'Email parameter required when using key auth']];
+            }
+            $stmt = db()->prepare('SELECT id FROM users WHERE email = ?');
+            $stmt->execute([$email]);
+            $user = $stmt->fetch();
+            if (!$user) {
+                return ['status' => 404, 'data' => ['error' => 'User not found']];
+            }
+            $userId = $user['id'];
         }
 
         // Get user email

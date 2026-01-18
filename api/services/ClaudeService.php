@@ -172,6 +172,11 @@ PROMPT;
         $plantInfo .= "\nCurrent health: " . ($plant['health_status'] ?? 'unknown');
         $plantInfo .= "\nSeason: $season";
 
+        // Add user notes if present
+        if (!empty($plant['notes'])) {
+            $plantInfo .= "\nUser notes: " . $plant['notes'];
+        }
+
         // Propagation info
         if (!empty($plant['is_propagation'])) {
             $plantInfo .= "\nPROPAGATION: This is a cutting/propagation, NOT a mature plant";
@@ -191,37 +196,93 @@ PROMPT;
             $plantInfo .= "\nGrow light: Yes, {$hours} hours/day";
         }
 
+        // Species-specific care info (if available from AI identification)
+        $speciesCareInfo = "";
+        if (!empty($plant['known_care_needs'])) {
+            $care = $plant['known_care_needs'];
+            $speciesCareInfo = "\n\n=== SPECIES-SPECIFIC CARE GUIDELINES ===";
+            if (!empty($care['water']['frequency'])) {
+                $speciesCareInfo .= "\nWatering: " . $care['water']['frequency'];
+            }
+            if (!empty($care['light']['ideal'])) {
+                $speciesCareInfo .= "\nLight needs: " . $care['light']['ideal'];
+            }
+            if (!empty($care['humidity']['ideal'])) {
+                $speciesCareInfo .= "\nHumidity: " . $care['humidity']['ideal'];
+            }
+            if (!empty($care['fertilizer']['frequency'])) {
+                $speciesCareInfo .= "\nFertilizing: " . $care['fertilizer']['frequency'];
+            }
+        }
+
+        // Recent health analysis from photos
+        $healthContext = "";
+        if (!empty($plant['last_photo_analysis'])) {
+            $analysis = $plant['last_photo_analysis'];
+            $healthContext = "\n\n=== RECENT HEALTH ANALYSIS ===";
+            $healthContext .= "\nPhoto date: " . ($plant['last_photo_date'] ?? 'Unknown');
+            if (!empty($analysis['health_status'])) {
+                $healthContext .= "\nHealth status: " . $analysis['health_status'];
+            }
+            if (!empty($analysis['issues']) && is_array($analysis['issues'])) {
+                $healthContext .= "\nIdentified issues: " . implode(', ', $analysis['issues']);
+            }
+            if (!empty($analysis['recommendations']) && is_array($analysis['recommendations'])) {
+                $healthContext .= "\nRecommendations: " . implode('; ', array_slice($analysis['recommendations'], 0, 3));
+            }
+        }
+
+        // Care history statistics
+        $statsInfo = "";
+        if (!empty($plant['care_history_stats'])) {
+            $statsInfo = "\n\n=== CARE COMPLETION HISTORY ===";
+            foreach ($plant['care_history_stats'] as $stat) {
+                $statsInfo .= "\n- {$stat['task_type']}: completed {$stat['count']} times";
+                if (!empty($stat['last_completed'])) {
+                    $statsInfo .= " (last: " . date('M j', strtotime($stat['last_completed'])) . ")";
+                }
+            }
+        }
+
         $careHistory = "";
         if (!empty($careLog)) {
-            $careHistory = "\n\nRecent care history:\n";
-            foreach (array_slice($careLog, 0, 10) as $log) {
-                $careHistory .= "- {$log['action']} on {$log['performed_at']}";
-                if ($log['outcome']) {
-                    $careHistory .= " (outcome: {$log['outcome']})";
+            $careHistory = "\n\n=== RECENT CARE ACTIONS ===";
+            foreach (array_slice($careLog, 0, 15) as $log) {
+                $careHistory .= "\n- {$log['action']} on " . date('M j', strtotime($log['performed_at']));
+                if (!empty($log['notes'])) {
+                    $careHistory .= " ({$log['notes']})";
                 }
-                $careHistory .= "\n";
+                if (!empty($log['outcome'])) {
+                    $careHistory .= " [outcome: {$log['outcome']}]";
+                }
             }
         }
 
         $today = date('Y-m-d');
 
         $prompt = <<<PROMPT
-Generate a care plan for this plant.
+Generate a personalized care plan for this plant based on all available data.
 
+=== PLANT DETAILS ===
 $plantInfo
+$speciesCareInfo
+$healthContext
+$statsInfo
 $careHistory
 
 Today's date: $today
 
 Create a personalized care schedule considering:
-1. The specific species needs
+1. The specific species needs (use the species-specific guidelines if provided)
 2. Current season ($season) and how it affects watering/fertilizing
-3. The plant's health status
-4. Previous care history and outcomes
+3. The plant's health status and any recent issues identified
+4. Previous care history, outcomes, and completion patterns
+5. The plant's environment (location, light, grow lights)
+6. Any notes or preferences from the user
 
 Respond ONLY with valid JSON:
 {
-    "reasoning": "Brief explanation of the care plan rationale",
+    "reasoning": "Brief explanation of the care plan rationale, referencing specific factors you considered",
     "next_photo_check": "YYYY-MM-DD when to request health photo",
     "photo_check_reason": "Why you're requesting a photo then",
     "tasks": [
@@ -247,6 +308,10 @@ IMPORTANT for propagations:
 IMPORTANT for grow lights:
 - Consider grow light hours when scheduling. More light = more water needed
 - Grow lights can compensate for low natural light conditions
+
+IMPORTANT for health issues:
+- If there are identified health issues, prioritize tasks that address them
+- Adjust watering frequency if overwatering/underwatering was detected
 PROMPT;
 
         $response = $this->sendRequest([

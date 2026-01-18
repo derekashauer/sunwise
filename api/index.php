@@ -112,6 +112,8 @@ $routes = [
     'POST /tasks/{id}/complete' => ['TaskController', 'complete', true],
     'POST /tasks/{id}/skip' => ['TaskController', 'skip', true],
     'GET /tasks/{id}/recommendations' => ['TaskController', 'recommendations', true],
+    'POST /tasks/{id}/adjust-schedule' => ['TaskController', 'adjustSchedule', true],
+    'POST /tasks/{id}/apply-adjustment' => ['TaskController', 'applyAdjustment', true],
 
     // Location routes
     'GET /locations' => ['LocationController', 'index', true],
@@ -198,6 +200,7 @@ $routes = [
 
     // Cron routes (no auth, but protected by secret key in query param)
     'GET /cron/daily-reminders' => ['CronController', 'dailyReminders'],
+    'GET /cron/status' => ['CronController', 'status', true],
     'GET /cron/test-email' => ['CronController', 'testEmail', true],
 
     // Household sharing routes

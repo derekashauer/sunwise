@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
@@ -7,19 +7,32 @@ const plant = ref(null)
 const ownerName = ref('')
 const loading = ref(true)
 const error = ref(null)
+const hasAttemptedLoad = ref(false)
 
 const shareUrl = computed(() => window.location.href)
 
 onMounted(async () => {
-  await loadPlant()
+  // If route params are ready, load immediately
+  if (route.params?.id) {
+    await loadPlant()
+  }
 })
 
+// Watch for route params in case they're not immediately available
+watch(() => route.params?.id, async (newId) => {
+  if (newId && !hasAttemptedLoad.value) {
+    await loadPlant()
+  }
+}, { immediate: true })
+
 async function loadPlant() {
+  hasAttemptedLoad.value = true
   loading.value = true
   error.value = null
 
   try {
-    const plantId = route.params.id
+    // Wait for route to be ready
+    const plantId = route.params?.id
 
     if (!plantId) {
       throw new Error('Plant ID not provided')
@@ -34,12 +47,17 @@ async function loadPlant() {
       }
     })
 
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}))
-      throw new Error(data.error || `Failed to load plant (${response.status})`)
+    // Handle non-JSON responses (e.g., HTML error pages)
+    const contentType = response.headers.get('content-type')
+    if (!contentType || !contentType.includes('application/json')) {
+      throw new Error(`Server returned non-JSON response (${response.status})`)
     }
 
     const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.error || `Failed to load plant (${response.status})`)
+    }
 
     if (!data.plant) {
       throw new Error('Plant data not found in response')

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { usePlantsStore } from '@/stores/plants'
 import TaskItem from '@/components/tasks/TaskItem.vue'
+import AiStatusBanner from '@/components/common/AiStatusBanner.vue'
 
 const router = useRouter()
 const tasks = useTasksStore()
@@ -118,6 +119,9 @@ function isGroupCompleting(groupName) {
 
 <template>
   <div class="page-container">
+    <!-- AI Status Banner -->
+    <AiStatusBanner />
+
     <header class="mb-6">
       <h1 class="page-title">{{ greeting }}</h1>
       <p class="text-charcoal-400 mt-1">

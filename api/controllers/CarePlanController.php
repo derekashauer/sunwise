@@ -103,8 +103,13 @@ class CarePlanController
      */
     public function generateCarePlan(int $plantId, ?int $userId = null): ?array
     {
-        // Get plant details
-        $stmt = db()->prepare('SELECT * FROM plants WHERE id = ?');
+        // Get comprehensive plant details including location
+        $stmt = db()->prepare('
+            SELECT p.*, l.name as location_name, l.light_level as location_light
+            FROM plants p
+            LEFT JOIN locations l ON p.location_id = l.id
+            WHERE p.id = ?
+        ');
         $stmt->execute([$plantId]);
         $plant = $stmt->fetch();
 
@@ -112,7 +117,23 @@ class CarePlanController
             return null;
         }
 
-        // Get recent care log
+        // Add location info to plant data for AI
+        if ($plant['location_name']) {
+            $plant['location'] = $plant['location_name'];
+            if ($plant['location_light']) {
+                $plant['location'] .= ' (' . $plant['location_light'] . ' light)';
+            }
+        }
+
+        // Get species care info if available and add to plant context
+        if (!empty($plant['species_care_info'])) {
+            $careInfo = json_decode($plant['species_care_info'], true);
+            if ($careInfo) {
+                $plant['known_care_needs'] = $careInfo;
+            }
+        }
+
+        // Get recent care log with more detail
         $stmt = db()->prepare('
             SELECT action, performed_at, notes, outcome
             FROM care_log
@@ -123,9 +144,9 @@ class CarePlanController
         $stmt->execute([$plantId]);
         $careLog = $stmt->fetchAll();
 
-        // Get most recent photo
+        // Get most recent photo and its AI analysis for health context
         $stmt = db()->prepare('
-            SELECT filename, ai_analysis
+            SELECT filename, ai_analysis, uploaded_at
             FROM photos
             WHERE plant_id = ?
             ORDER BY uploaded_at DESC
@@ -133,6 +154,28 @@ class CarePlanController
         ');
         $stmt->execute([$plantId]);
         $photo = $stmt->fetch();
+
+        // Add photo analysis to plant context if available
+        if ($photo && !empty($photo['ai_analysis'])) {
+            $photoAnalysis = json_decode($photo['ai_analysis'], true);
+            if ($photoAnalysis) {
+                $plant['last_photo_analysis'] = $photoAnalysis;
+                $plant['last_photo_date'] = $photo['uploaded_at'];
+            }
+        }
+
+        // Get any completed/skipped task info for context (what worked, what was skipped)
+        $stmt = db()->prepare('
+            SELECT task_type, COUNT(*) as count, MAX(completed_at) as last_completed
+            FROM tasks
+            WHERE plant_id = ? AND completed_at IS NOT NULL
+            GROUP BY task_type
+        ');
+        $stmt->execute([$plantId]);
+        $completedTaskStats = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (!empty($completedTaskStats)) {
+            $plant['care_history_stats'] = $completedTaskStats;
+        }
 
         // Deactivate existing care plans and delete pending tasks
         $stmt = db()->prepare('UPDATE care_plans SET is_active = 0 WHERE plant_id = ?');
@@ -159,11 +202,12 @@ class CarePlanController
             $season = 'winter';
         }
 
-        // Generate care plan with AI
+        // Generate care plan with AI - use AIServiceFactory to get user's preferred provider
         try {
-            $claudeService = new ClaudeService();
-            $aiPlan = $claudeService->generateCarePlan($plant, $careLog, $season);
-            ClaudeService::logUsage($userId ?? $plant['user_id'], 'care_plan', true, null, $claudeService->getModel());
+            $effectiveUserId = $userId ?? $plant['user_id'];
+            $aiService = AIServiceFactory::getForUser($effectiveUserId);
+            $aiPlan = $aiService->generateCarePlan($plant, $careLog, $season);
+            ClaudeService::logUsage($effectiveUserId, 'care_plan', true, null, $aiService->getModel());
         } catch (Exception $e) {
             error_log('AI care plan generation failed: ' . $e->getMessage());
             ClaudeService::logUsage($userId ?? $plant['user_id'], 'care_plan', false, $e->getMessage());

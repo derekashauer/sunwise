@@ -63,6 +63,14 @@ interface AIServiceInterface
      * @return string Model identifier
      */
     public function getModel(): string;
+
+    /**
+     * Generate a species care info sheet
+     *
+     * @param string $species The species name
+     * @return array|null Care info data or null on failure
+     */
+    public function generateSpeciesCareInfo(string $species): ?array;
 }
 
 /**

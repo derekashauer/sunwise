@@ -2,6 +2,21 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.9.1] - 2026-01-17
+
+### Added
+- **AI Status Banner**: Dashboard shows warnings when AI service has issues or cron jobs haven't run
+- **Cron Job Monitoring**: New `/cron/status` endpoint for tracking cron job execution history
+- Cron jobs now log execution with success/failure tracking
+
+### Changed
+- Improved care schedule updates from AI chat - now directly updates task frequency instead of regenerating entire care plan
+- PlantShareView now handles route params more robustly with watchers
+- Better error handling for non-JSON responses in share view
+
+### Fixed
+- Care plan generation properly passes userId for AI logging attribution
+
 ## [0.9.0] - 2026-01-14
 
 ### Added

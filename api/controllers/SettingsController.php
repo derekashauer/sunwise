@@ -549,15 +549,80 @@ class SettingsController
         $stmt->execute([$userId]);
         $errorCount = $stmt->fetch()['error_count'];
 
+        // Get last error message
+        $stmt = db()->prepare('
+            SELECT error_message, action, created_at
+            FROM ai_usage_log
+            WHERE user_id = ? AND success = 0
+            ORDER BY created_at DESC
+            LIMIT 1
+        ');
+        $stmt->execute([$userId]);
+        $lastError = $stmt->fetch();
+
+        // Get last successful call
+        $stmt = db()->prepare('
+            SELECT action, model, created_at
+            FROM ai_usage_log
+            WHERE user_id = ? AND success = 1
+            ORDER BY created_at DESC
+            LIMIT 1
+        ');
+        $stmt->execute([$userId]);
+        $lastSuccess = $stmt->fetch();
+
+        // Check for credit/quota related errors
+        $creditError = false;
+        $creditErrorMessage = null;
+        if ($lastError && $lastError['error_message']) {
+            $errorMsg = strtolower($lastError['error_message']);
+            if (strpos($errorMsg, 'credit') !== false ||
+                strpos($errorMsg, 'quota') !== false ||
+                strpos($errorMsg, 'rate limit') !== false ||
+                strpos($errorMsg, 'billing') !== false ||
+                strpos($errorMsg, 'insufficient') !== false ||
+                strpos($errorMsg, 'payment') !== false) {
+                $creditError = true;
+                $creditErrorMessage = $lastError['error_message'];
+            }
+        }
+
         // Determine status
         $status = 'not_configured';
+        $statusMessage = 'No AI API key configured. Add your API key in Settings to enable AI features.';
+
         if ($settings['has_claude_key'] || $settings['has_openai_key']) {
-            $status = $errorCount > 0 ? 'error' : 'connected';
+            if ($creditError) {
+                $status = 'credit_issue';
+                $statusMessage = 'Your AI account may have credit or quota issues. Check your API provider dashboard.';
+            } elseif ($errorCount > 5) {
+                $status = 'error';
+                $statusMessage = 'Multiple AI errors detected in the last 24 hours. Check your API key or connection.';
+            } elseif ($errorCount > 0) {
+                $status = 'warning';
+                $statusMessage = 'Some AI requests failed recently. Check the log for details.';
+            } else {
+                $status = 'connected';
+                $statusMessage = 'AI is connected and working properly.';
+            }
         }
 
         return [
             'status' => $status,
+            'status_message' => $statusMessage,
             'error_count_24h' => (int)$errorCount,
+            'credit_error' => $creditError,
+            'credit_error_message' => $creditErrorMessage,
+            'last_error' => $lastError ? [
+                'message' => $lastError['error_message'],
+                'action' => $lastError['action'],
+                'time' => $lastError['created_at']
+            ] : null,
+            'last_success' => $lastSuccess ? [
+                'action' => $lastSuccess['action'],
+                'model' => $lastSuccess['model'],
+                'time' => $lastSuccess['created_at']
+            ] : null,
             'recent_log' => $recentLog,
             'has_claude_key' => $settings['has_claude_key'],
             'has_openai_key' => $settings['has_openai_key']

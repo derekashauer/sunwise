@@ -142,12 +142,16 @@ function getSkipReasonText() {
 }
 
 async function skipWithReason() {
-  if (!skipReason.value) return
-  if (skipReason.value === 'other' && !customSkipReason.value.trim()) return
+  // Skip reason is now optional - can skip without selecting a reason
+  if (skipReason.value === 'other' && !customSkipReason.value.trim()) {
+    // If "other" is selected, require custom text
+    return
+  }
 
   skipping.value = true
   try {
-    await tasks.skipTask(props.task.id, getSkipReasonText())
+    const reason = skipReason.value ? getSkipReasonText() : null
+    await tasks.skipTask(props.task.id, reason)
     window.$toast?.success('Task skipped')
     closeSkipModal()
     emit('skipped', props.task)
@@ -490,13 +494,13 @@ async function applyScheduleAdjustment() {
             <div class="flex gap-3 pt-2">
               <button
                 @click="skipWithReason"
-                :disabled="!skipReason || skipping || (skipReason === 'other' && !customSkipReason.trim())"
+                :disabled="skipping || (skipReason === 'other' && !customSkipReason.trim())"
                 class="flex-1 btn-secondary"
               >
                 <span v-if="skipping" class="flex items-center justify-center gap-2">
                   <div class="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
                 </span>
-                <span v-else>Skip Only</span>
+                <span v-else>Skip{{ skipReason ? '' : ' Without Reason' }}</span>
               </button>
               <button
                 v-if="scheduleAdjustment"
