@@ -264,12 +264,19 @@ $careHistory
 Today's date: $today
 
 Create a personalized care schedule considering:
-1. The specific species needs (use the species-specific guidelines if provided)
-2. Current season ($season) and how it affects watering/fertilizing
-3. The plant's health status and any recent issues identified
-4. Previous care history, outcomes, and completion patterns
-5. The plant's environment (location, light, grow lights)
-6. Any notes or preferences from the user
+1. USER NOTES ARE THE HIGHEST PRIORITY - if the user specifies a watering frequency or care preference, follow it exactly
+2. The specific species needs (use the species-specific guidelines if provided, but user notes override these)
+3. Current season ($season) and how it affects watering/fertilizing
+4. The plant's health status and any recent issues identified
+5. Previous care history, outcomes, and completion patterns
+6. The plant's environment (location, light, grow lights)
+
+CRITICAL - Calculating due_date:
+- Look at the CARE COMPLETION HISTORY to find when each task type was last completed
+- Calculate the next due_date as: last_completed_date + interval_days
+- If this calculated date is in the past (overdue), set due_date to TODAY
+- If no completion history exists, set due_date to today
+- Example: If user says "water every 3 days" and last watering was 6 days ago, the task is overdue - set due_date to today
 
 Respond ONLY with valid JSON:
 {

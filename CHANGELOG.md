@@ -2,6 +2,17 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.9.4] - 2026-01-20
+
+### Changed
+- **User notes now override species defaults** - AI will follow your explicit care preferences (e.g., "water 2x/week")
+- Care plan generation now calculates due dates based on when tasks were last completed, not arbitrary future dates
+- Overdue tasks are now scheduled for today when regenerating care plans
+
+### Fixed
+- "Database is locked" error when updating care plans from chat - enabled WAL mode and busy timeout
+- Tasks that should be overdue are now properly marked as due today
+
 ## [0.9.3] - 2026-01-19
 
 ### Fixed

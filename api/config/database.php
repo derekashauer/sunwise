@@ -34,6 +34,12 @@ class Database
             // Enable foreign keys
             self::$instance->exec('PRAGMA foreign_keys = ON');
 
+            // Enable WAL mode for better concurrency (reduces "database is locked" errors)
+            self::$instance->exec('PRAGMA journal_mode = WAL');
+
+            // Set busy timeout to 5 seconds (wait instead of failing immediately)
+            self::$instance->exec('PRAGMA busy_timeout = 5000');
+
             // Run migrations if new database
             if ($isNewDb) {
                 self::runMigrations();
