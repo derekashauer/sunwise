@@ -2,6 +2,12 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.9.3] - 2026-01-19
+
+### Fixed
+- Care plan regeneration now works correctly (was failing due to missing database column)
+- Added missing `light_level` column to locations table
+
 ## [0.9.2] - 2026-01-19
 
 ### Changed

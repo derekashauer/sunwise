@@ -66,7 +66,7 @@ class CarePlanController
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
         }
 
-        $carePlan = $this->generateCarePlan($plantId);
+        $carePlan = $this->generateCarePlan($plantId, $userId);
 
         return ['care_plan' => $carePlan, 'message' => 'Care plan regenerated'];
     }
