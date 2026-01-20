@@ -31,6 +31,24 @@ const greeting = computed(() => {
 const pendingTasks = computed(() => tasks.todayTasks.filter(t => !t.completed_at))
 const completedTasks = computed(() => tasks.todayTasks.filter(t => t.completed_at))
 
+// Task type sort order (most common/important first)
+const taskTypePriority = {
+  water: 1,
+  change_water: 2,
+  mist: 3,
+  fertilize: 4,
+  check: 5,
+  check_roots: 6,
+  rotate: 7,
+  trim: 8,
+  repot: 9,
+  pot_up: 10
+}
+
+function getTaskPriority(taskType) {
+  return taskTypePriority[taskType] ?? 99
+}
+
 // Group pending tasks by location
 const tasksByLocation = computed(() => {
   const groups = {}
@@ -48,7 +66,11 @@ const tasksByLocation = computed(() => {
     if (b === 'No Location') return -1
     return a.localeCompare(b)
   })
-  return sortedLocations.map(name => ({ name, tasks: groups[name] }))
+  // Sort tasks within each location by task type
+  return sortedLocations.map(name => ({
+    name,
+    tasks: groups[name].sort((a, b) => getTaskPriority(a.task_type) - getTaskPriority(b.task_type))
+  }))
 })
 
 // Group pending tasks by task type

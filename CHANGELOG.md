@@ -2,6 +2,11 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.9.2] - 2026-01-19
+
+### Changed
+- Tasks within each location are now sorted by task type (water, mist, fertilize, etc.) for a more logical workflow
+
 ## [0.9.1] - 2026-01-17
 
 ### Added
