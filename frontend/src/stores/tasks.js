@@ -56,6 +56,51 @@ export const useTasksStore = defineStore('tasks', () => {
     return response.task
   }
 
+  async function completeCheckTask(taskId, checkData) {
+    // Build a summary note from check data for backwards compatibility
+    const summaryParts = []
+    if (checkData.moisture_level) {
+      const moistureLabel = checkData.moisture_level <= 3 ? 'dry' : checkData.moisture_level <= 7 ? 'moist' : 'wet'
+      summaryParts.push(`Moisture: ${checkData.moisture_level}/10 (${moistureLabel})`)
+    }
+    if (checkData.light_reading) {
+      summaryParts.push(`Light: ${checkData.light_reading} fc`)
+    }
+    if (checkData.general_health) {
+      summaryParts.push(`Health: ${checkData.general_health}/5`)
+    }
+    const observations = []
+    if (checkData.new_growth) observations.push('new growth')
+    if (checkData.yellowing_leaves) observations.push('yellowing')
+    if (checkData.brown_tips) observations.push('brown tips')
+    if (checkData.pests_observed) observations.push('pests')
+    if (checkData.dusty_dirty) observations.push('needs cleaning')
+    if (observations.length) {
+      summaryParts.push(`Observed: ${observations.join(', ')}`)
+    }
+    if (checkData.notes) {
+      summaryParts.push(checkData.notes)
+    }
+
+    const response = await api.post(`/tasks/${taskId}/complete`, {
+      notes: summaryParts.join('. '),
+      check_data: checkData
+    })
+
+    // Update local state
+    const updateTask = (tasks) => {
+      const index = tasks.findIndex(t => t.id === taskId)
+      if (index !== -1) {
+        tasks[index] = response.task
+      }
+    }
+
+    updateTask(todayTasks.value)
+    updateTask(upcomingTasks.value)
+
+    return response.task
+  }
+
   async function skipTask(taskId, reason) {
     const response = await api.post(`/tasks/${taskId}/skip`, { reason })
 
@@ -108,6 +153,7 @@ export const useTasksStore = defineStore('tasks', () => {
     fetchTodayTasks,
     fetchUpcomingTasks,
     completeTask,
+    completeCheckTask,
     skipTask,
     bulkCompleteTasks,
     bulkSkipTasks,

@@ -236,8 +236,10 @@ PROMPT;
         }
 
         $careHistory = "";
+        $checkReadings = "";
         if (!empty($careLog)) {
             $careHistory = "\n\n=== RECENT CARE ACTIONS ===";
+            $checks = [];
             foreach (array_slice($careLog, 0, 15) as $log) {
                 $careHistory .= "\n- {$log['action']} on " . date('M j', strtotime($log['performed_at']));
                 if (!empty($log['notes'])) {
@@ -245,6 +247,56 @@ PROMPT;
                 }
                 if (!empty($log['outcome'])) {
                     $careHistory .= " [outcome: {$log['outcome']}]";
+                }
+
+                // Collect check readings for separate analysis
+                if ($log['action'] === 'check' && !empty($log['check_data'])) {
+                    $checkData = json_decode($log['check_data'], true);
+                    if ($checkData) {
+                        $checks[] = ['date' => $log['performed_at'], 'data' => $checkData];
+                    }
+                }
+            }
+
+            // Format check readings for AI analysis
+            if (!empty($checks)) {
+                $checkReadings = "\n\n=== PLANT CHECK READINGS ===";
+                $checkReadings .= "\n(Use these to assess plant health trends. Light readings taken in evening/night should be disregarded for peak light assessment.)";
+                foreach (array_slice($checks, 0, 10) as $check) {
+                    $data = $check['data'];
+                    $time = date('M j \a\t g:ia', strtotime($data['recorded_at'] ?? $check['date']));
+                    $checkReadings .= "\n\n$time:";
+
+                    if (isset($data['moisture_level'])) {
+                        $moistureLabel = $data['moisture_level'] <= 3 ? 'dry' : ($data['moisture_level'] <= 7 ? 'moist' : 'wet');
+                        $checkReadings .= "\n  - Moisture: {$data['moisture_level']}/10 ($moistureLabel)";
+                    }
+                    if (!empty($data['light_reading'])) {
+                        $checkReadings .= "\n  - Light: {$data['light_reading']} fc";
+                    }
+                    if (isset($data['general_health'])) {
+                        $checkReadings .= "\n  - Health rating: {$data['general_health']}/5";
+                    }
+
+                    $observations = [];
+                    if (!empty($data['new_growth'])) $observations[] = 'new growth';
+                    if (!empty($data['yellowing_leaves'])) $observations[] = 'yellowing leaves';
+                    if (!empty($data['brown_tips'])) $observations[] = 'brown tips';
+                    if (!empty($data['pests_observed'])) {
+                        $pestInfo = 'pests observed';
+                        if (!empty($data['pest_notes'])) {
+                            $pestInfo .= " ({$data['pest_notes']})";
+                        }
+                        $observations[] = $pestInfo;
+                    }
+                    if (!empty($data['dusty_dirty'])) $observations[] = 'needs cleaning';
+
+                    if (!empty($observations)) {
+                        $checkReadings .= "\n  - Observations: " . implode(', ', $observations);
+                    }
+                    if (!empty($data['notes'])) {
+                        $checkReadings .= "\n  - Notes: {$data['notes']}";
+                    }
                 }
             }
         }
@@ -260,6 +312,7 @@ $speciesCareInfo
 $healthContext
 $statsInfo
 $careHistory
+$checkReadings
 
 Today's date: $today
 
@@ -270,6 +323,7 @@ Create a personalized care schedule considering:
 4. The plant's health status and any recent issues identified
 5. Previous care history, outcomes, and completion patterns
 6. The plant's environment (location, light, grow lights)
+7. PLANT CHECK READINGS (if available) - use moisture levels to optimize watering intervals, light readings to assess if plant is getting adequate light, and observations to identify health trends
 
 CRITICAL - Calculating due_date:
 - Look at the CARE COMPLETION HISTORY to find when each task type was last completed

@@ -5,6 +5,7 @@ import { useTasksStore } from '@/stores/tasks'
 import { useApi } from '@/composables/useApi'
 import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
 import CareInfoModal from '@/components/plants/CareInfoModal.vue'
+import CheckTaskModal from '@/components/tasks/CheckTaskModal.vue'
 
 const router = useRouter()
 
@@ -25,10 +26,11 @@ const recError = ref(null)
 const showNotesInput = ref(false)
 const notes = ref('')
 
-// Skip modal state
+// Modal states
 const showSkipModal = ref(false)
 const showImageModal = ref(false)
 const showCareInfoModal = ref(false)
+const showCheckModal = ref(false)
 const skipReason = ref('')
 const customSkipReason = ref('')
 const skipping = ref(false)
@@ -95,7 +97,12 @@ async function fetchRecommendations() {
 
 function handleCheckboxClick() {
   if (props.completed) return
-  showNotesInput.value = true
+  // For check tasks, show the structured data modal
+  if (props.task.task_type === 'check') {
+    showCheckModal.value = true
+  } else {
+    showNotesInput.value = true
+  }
 }
 
 async function complete(withNotes = false) {
@@ -117,6 +124,21 @@ async function complete(withNotes = false) {
 function cancelNotes() {
   showNotesInput.value = false
   notes.value = ''
+}
+
+async function handleCheckComplete(checkData) {
+  if (loading.value || props.completed) return
+  loading.value = true
+  try {
+    await tasks.completeCheckTask(props.task.id, checkData)
+    window.$toast?.success('Check completed!')
+    showCheckModal.value = false
+    emit('completed', props.task)
+  } catch (error) {
+    window.$toast?.error(error.message)
+  } finally {
+    loading.value = false
+  }
 }
 
 function openSkipModal() {
@@ -552,6 +574,15 @@ async function applyScheduleAdjustment() {
       :plant-name="plant?.name || task.plant_name"
       :visible="showCareInfoModal"
       @close="showCareInfoModal = false"
+    />
+
+    <!-- Check Task Modal -->
+    <CheckTaskModal
+      :task="task"
+      :plant-name="plant?.name || task.plant_name"
+      :visible="showCheckModal"
+      @close="showCheckModal = false"
+      @complete="handleCheckComplete"
     />
   </div>
 </template>

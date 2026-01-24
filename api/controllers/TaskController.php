@@ -152,6 +152,7 @@ class TaskController
     {
         $taskId = $params['id'];
         $notes = $body['notes'] ?? null;
+        $checkData = $body['check_data'] ?? null;
 
         // Get task details
         $stmt = db()->prepare('
@@ -176,17 +177,19 @@ class TaskController
         $stmt = db()->prepare('UPDATE tasks SET completed_at = datetime("now"), notes = ?, completed_by_user_id = ? WHERE id = ?');
         $stmt->execute([$notes, $userId, $taskId]);
 
-        // Log to care log with performer attribution
+        // Log to care log with performer attribution and check data
+        $checkDataJson = $checkData ? json_encode($checkData) : null;
         $stmt = db()->prepare('
-            INSERT INTO care_log (plant_id, task_id, action, notes, performed_by_user_id)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO care_log (plant_id, task_id, action, notes, performed_by_user_id, check_data)
+            VALUES (?, ?, ?, ?, ?, ?)
         ');
         $stmt->execute([
             $task['plant_id'],
             $taskId,
             $task['task_type'],
             $notes,
-            $userId
+            $userId,
+            $checkDataJson
         ]);
 
         // Generate next occurrence if recurring

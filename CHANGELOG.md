@@ -2,6 +2,18 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.10.0] - 2026-01-24
+
+### Added
+- **Enhanced check tasks** - Capture structured plant health data during check tasks:
+  - Moisture level (1-10 scale with dry/moist/wet indicators)
+  - Light readings in foot-candles
+  - Observations: new growth, yellowing leaves, brown tips, pests, dusty/dirty
+  - Overall health rating (1-5)
+  - Optional notes
+- Time of check is recorded for context (e.g., light readings at midday vs evening)
+- AI now uses check readings to optimize care plans and identify health trends
+
 ## [0.9.6] - 2026-01-24
 
 ### Fixed
