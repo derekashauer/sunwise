@@ -12,6 +12,8 @@ const plants = usePlantsStore()
 
 const completingLocation = ref(null)
 const completingTaskType = ref(null)
+const skippingLocation = ref(null)
+const skippingTaskType = ref(null)
 const groupBy = ref('location') // 'location' or 'task'
 
 onMounted(async () => {
@@ -137,6 +139,33 @@ function isGroupCompleting(groupName) {
     ? completingLocation.value === groupName
     : completingTaskType.value === groupName
 }
+
+async function skipAllInGroup(group) {
+  if (groupBy.value === 'location') {
+    if (skippingLocation.value) return
+    skippingLocation.value = group.name
+  } else {
+    if (skippingTaskType.value) return
+    skippingTaskType.value = group.name
+  }
+
+  try {
+    const taskIds = group.tasks.map(t => t.id)
+    await tasks.bulkSkipTasks(taskIds, 'Bulk skipped')
+    window.$toast?.success(`Skipped ${taskIds.length} ${group.name} tasks`)
+  } catch (e) {
+    window.$toast?.error('Failed to skip tasks')
+  } finally {
+    skippingLocation.value = null
+    skippingTaskType.value = null
+  }
+}
+
+function isGroupSkipping(groupName) {
+  return groupBy.value === 'location'
+    ? skippingLocation.value === groupName
+    : skippingTaskType.value === groupName
+}
 </script>
 
 <template>
@@ -251,27 +280,49 @@ function isGroupCompleting(groupName) {
                 <span class="font-semibold capitalize">{{ group.name }}</span>
                 <span class="text-charcoal-300 bg-cream-200 px-2 py-0.5 rounded-full text-xs">{{ group.tasks.length }}</span>
               </div>
-              <!-- Complete All button -->
-              <button
-                v-if="group.tasks.length > 1"
-                @click="completeAllInGroup(group)"
-                :disabled="isGroupCompleting(group.name)"
-                class="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-sage-700 bg-sage-100 hover:bg-sage-200 rounded-full transition-colors disabled:opacity-50"
-              >
-                <img
-                  v-if="isGroupCompleting(group.name)"
-                  src="https://img.icons8.com/doodle/48/watering-can.png"
-                  alt=""
-                  class="w-4 h-4 animate-bounce"
+              <!-- Bulk action buttons -->
+              <div v-if="group.tasks.length > 1" class="flex items-center gap-2">
+                <!-- Complete All button -->
+                <button
+                  @click="completeAllInGroup(group)"
+                  :disabled="isGroupCompleting(group.name) || isGroupSkipping(group.name)"
+                  class="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-sage-700 bg-sage-100 hover:bg-sage-200 rounded-full transition-colors disabled:opacity-50"
                 >
-                <img
-                  v-else
-                  src="https://img.icons8.com/doodle/48/checkmark--v1.png"
-                  alt=""
-                  class="w-4 h-4"
+                  <img
+                    v-if="isGroupCompleting(group.name)"
+                    src="https://img.icons8.com/doodle/48/watering-can.png"
+                    alt=""
+                    class="w-4 h-4 animate-bounce"
+                  >
+                  <img
+                    v-else
+                    src="https://img.icons8.com/doodle/48/checkmark--v1.png"
+                    alt=""
+                    class="w-4 h-4"
+                  >
+                  <span>{{ isGroupCompleting(group.name) ? 'Working...' : 'Complete All' }}</span>
+                </button>
+                <!-- Skip All button -->
+                <button
+                  @click="skipAllInGroup(group)"
+                  :disabled="isGroupSkipping(group.name) || isGroupCompleting(group.name)"
+                  class="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-charcoal-500 bg-charcoal-100 hover:bg-charcoal-200 rounded-full transition-colors disabled:opacity-50"
                 >
-                <span>{{ isGroupCompleting(group.name) ? 'Working...' : 'Complete All' }}</span>
-              </button>
+                  <img
+                    v-if="isGroupSkipping(group.name)"
+                    src="https://img.icons8.com/doodle/48/watering-can.png"
+                    alt=""
+                    class="w-4 h-4 animate-bounce"
+                  >
+                  <img
+                    v-else
+                    src="https://img.icons8.com/doodle/48/forward.png"
+                    alt=""
+                    class="w-4 h-4"
+                  >
+                  <span>{{ isGroupSkipping(group.name) ? 'Skipping...' : 'Skip All' }}</span>
+                </button>
+              </div>
             </div>
             <div class="space-y-2">
               <TaskItem

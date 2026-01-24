@@ -109,6 +109,7 @@ $routes = [
     'GET /tasks/upcoming' => ['TaskController', 'upcoming', true],
     'GET /tasks/plant/{id}' => ['TaskController', 'forPlant', true],
     'POST /tasks/bulk-complete' => ['TaskController', 'bulkComplete', true],
+    'POST /tasks/bulk-skip' => ['TaskController', 'bulkSkip', true],
     'POST /tasks/{id}/complete' => ['TaskController', 'complete', true],
     'POST /tasks/{id}/skip' => ['TaskController', 'skip', true],
     'GET /tasks/{id}/recommendations' => ['TaskController', 'recommendations', true],

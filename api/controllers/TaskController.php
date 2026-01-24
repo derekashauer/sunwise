@@ -274,6 +274,79 @@ class TaskController
     }
 
     /**
+     * Skip multiple tasks at once (bulk action)
+     */
+    public function bulkSkip(array $params, array $body, ?int $userId): array
+    {
+        $taskIds = $body['task_ids'] ?? [];
+        $reason = $body['reason'] ?? null;
+
+        if (empty($taskIds) || !is_array($taskIds)) {
+            return ['status' => 400, 'data' => ['error' => 'No task IDs provided']];
+        }
+
+        // Limit to 50 tasks per request
+        $taskIds = array_slice($taskIds, 0, 50);
+
+        $skipped = [];
+        $failed = [];
+
+        foreach ($taskIds as $taskId) {
+            // Get task details
+            $stmt = db()->prepare('
+                SELECT t.*, p.user_id as owner_id
+                FROM tasks t
+                JOIN plants p ON t.plant_id = p.id
+                WHERE t.id = ?
+            ');
+            $stmt->execute([$taskId]);
+            $task = $stmt->fetch();
+
+            if (!$task || !$this->canAccessPlant($task['plant_id'], $userId)) {
+                $failed[] = $taskId;
+                continue;
+            }
+
+            if ($task['skipped_at'] || $task['completed_at']) {
+                // Already skipped or completed, skip
+                $skipped[] = $taskId;
+                continue;
+            }
+
+            // Mark as skipped
+            $stmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
+            $stmt->execute([$reason, $taskId]);
+
+            // Log to care log with performer attribution
+            $stmt = db()->prepare('
+                INSERT INTO care_log (plant_id, task_id, action, notes, outcome, performed_by_user_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ');
+            $stmt->execute([
+                $task['plant_id'],
+                $taskId,
+                'skipped_' . $task['task_type'],
+                $reason,
+                'neutral',
+                $userId
+            ]);
+
+            // Generate next occurrence if recurring
+            if ($task['recurrence']) {
+                $this->generateNextOccurrence($task);
+            }
+
+            $skipped[] = $taskId;
+        }
+
+        return [
+            'skipped' => $skipped,
+            'failed' => $failed,
+            'count' => count($skipped)
+        ];
+    }
+
+    /**
      * Skip a task
      */
     public function skip(array $params, array $body, ?int $userId): array

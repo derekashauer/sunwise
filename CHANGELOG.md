@@ -2,6 +2,12 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.9.5] - 2026-01-20
+
+### Added
+- **Bulk skip tasks** - Skip all tasks of a type at once (e.g., skip all mist tasks when it's too cold)
+- "Skip All" button appears alongside "Complete All" on the dashboard when grouped by location or task type
+
 ## [0.9.4] - 2026-01-20
 
 ### Changed

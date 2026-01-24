@@ -81,6 +81,18 @@ export const useTasksStore = defineStore('tasks', () => {
     return response
   }
 
+  async function bulkSkipTasks(taskIds, reason = null) {
+    const response = await api.post('/tasks/bulk-skip', { task_ids: taskIds, reason })
+
+    // Update local state - remove skipped tasks from lists
+    for (const taskId of response.skipped) {
+      todayTasks.value = todayTasks.value.filter(t => t.id !== taskId)
+      upcomingTasks.value = upcomingTasks.value.filter(t => t.id !== taskId)
+    }
+
+    return response
+  }
+
   async function getPlantTasks(plantId) {
     const response = await api.get(`/tasks/plant/${plantId}`)
     return response.tasks
@@ -98,6 +110,7 @@ export const useTasksStore = defineStore('tasks', () => {
     completeTask,
     skipTask,
     bulkCompleteTasks,
+    bulkSkipTasks,
     getPlantTasks
   }
 })
