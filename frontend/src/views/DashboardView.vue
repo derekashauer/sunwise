@@ -101,14 +101,14 @@ function getPlant(plantId) {
 function getTaskIcon(taskType) {
   const icons = {
     water: 'https://img.icons8.com/doodle/48/watering-can.png',
-    fertilize: 'https://img.icons8.com/doodle/48/fertilization--v1.png',
+    fertilize: 'https://img.icons8.com/doodle/48/nature-care.png',
     trim: 'https://img.icons8.com/doodle/48/cut.png',
     repot: 'https://img.icons8.com/doodle/48/potted-plant.png',
     rotate: 'https://img.icons8.com/doodle/48/rotate.png',
     mist: 'https://img.icons8.com/doodle/48/splash.png',
     check: 'https://img.icons8.com/doodle/48/visible--v1.png',
     change_water: 'https://img.icons8.com/doodle/48/water.png',
-    check_roots: 'https://img.icons8.com/doodle/48/root.png'
+    check_roots: 'https://img.icons8.com/doodle/48/soil.png'
   }
   return icons[taskType] || 'https://img.icons8.com/doodle/48/todo-list.png'
 }

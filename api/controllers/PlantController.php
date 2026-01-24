@@ -500,12 +500,13 @@ class PlantController
         // If no care info exists, generate it now
         if (empty($plant['species_care_info']) && !empty($plant['species'])) {
             try {
-                $claudeService = new ClaudeService();
-                $careInfo = $claudeService->generateSpeciesCareInfo($plant['species']);
+                // Use AIServiceFactory to get user's configured AI service
+                $aiService = AIServiceFactory::getForUser($userId);
+                $careInfo = $aiService->generateSpeciesCareInfo($plant['species']);
                 if ($careInfo) {
                     $stmt = db()->prepare('UPDATE plants SET species_care_info = ? WHERE id = ?');
                     $stmt->execute([json_encode($careInfo), $plantId]);
-                    ClaudeService::logUsage($userId, 'care_info', true, null, $claudeService->getModel());
+                    ClaudeService::logUsage($userId, 'care_info', true, null, $aiService->getModel());
                     return ['care_info' => $careInfo, 'species' => $plant['species']];
                 }
             } catch (Exception $e) {

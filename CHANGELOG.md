@@ -2,6 +2,13 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.10.1] - 2026-01-24
+
+### Fixed
+- Care info now uses user's configured AI provider (was hardcoded to Claude)
+- Updated fertilize icon to nature-care design
+- Updated check_roots icon to soil design
+
 ## [0.10.0] - 2026-01-24
 
 ### Added

@@ -50,14 +50,14 @@ const emit = defineEmits(['completed', 'skipped'])
 
 const taskIcons = {
   water: { src: 'https://img.icons8.com/doodle/48/watering-can.png', alt: 'water' },
-  fertilize: { src: 'https://img.icons8.com/doodle/48/fertilization--v1.png', alt: 'fertilize' },
+  fertilize: { src: 'https://img.icons8.com/doodle/48/nature-care.png', alt: 'fertilize' },
   trim: { src: 'https://img.icons8.com/doodle/48/cut.png', alt: 'trim' },
   repot: { src: 'https://img.icons8.com/doodle/48/potted-plant.png', alt: 'repot' },
   rotate: { src: 'https://img.icons8.com/doodle/48/rotate.png', alt: 'rotate' },
   mist: { src: 'https://img.icons8.com/doodle/48/splash.png', alt: 'mist' },
   check: { src: 'https://img.icons8.com/doodle/48/visible--v1.png', alt: 'check' },
   change_water: { src: 'https://img.icons8.com/doodle/48/water.png', alt: 'change water' },
-  check_roots: { src: 'https://img.icons8.com/doodle/48/root.png', alt: 'check roots' },
+  check_roots: { src: 'https://img.icons8.com/doodle/48/soil.png', alt: 'check roots' },
   pot_up: { src: 'https://img.icons8.com/doodle/48/potted-plant.png', alt: 'pot up' }
 }
 
