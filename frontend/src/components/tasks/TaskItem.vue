@@ -51,7 +51,7 @@ const taskIcons = {
   fertilize: { src: 'https://img.icons8.com/doodle/48/fertilization--v1.png', alt: 'fertilize' },
   trim: { src: 'https://img.icons8.com/doodle/48/cut.png', alt: 'trim' },
   repot: { src: 'https://img.icons8.com/doodle/48/potted-plant.png', alt: 'repot' },
-  rotate: { src: 'https://img.icons8.com/doodle/48/rotate-right.png', alt: 'rotate' },
+  rotate: { src: 'https://img.icons8.com/doodle/48/rotate.png', alt: 'rotate' },
   mist: { src: 'https://img.icons8.com/doodle/48/splash.png', alt: 'mist' },
   check: { src: 'https://img.icons8.com/doodle/48/visible--v1.png', alt: 'check' },
   change_water: { src: 'https://img.icons8.com/doodle/48/water.png', alt: 'change water' },
@@ -409,8 +409,9 @@ async function applyScheduleAdjustment() {
                 </svg>
               </button>
             </div>
-            <p class="text-sm text-gray-500 mt-1">
-              {{ taskIcons[task.task_type] }} {{ task.task_type }} - {{ plant?.name || task.plant_name }}
+            <p class="text-sm text-gray-500 mt-1 flex items-center gap-1">
+              <img :src="getTaskIcon(task.task_type).src" :alt="getTaskIcon(task.task_type).alt" class="w-4 h-4 inline">
+              <span class="capitalize">{{ task.task_type.replace('_', ' ') }}</span> - {{ plant?.name || task.plant_name }}
             </p>
           </div>
 

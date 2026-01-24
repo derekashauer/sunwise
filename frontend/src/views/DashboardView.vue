@@ -104,7 +104,7 @@ function getTaskIcon(taskType) {
     fertilize: 'https://img.icons8.com/doodle/48/fertilization--v1.png',
     trim: 'https://img.icons8.com/doodle/48/cut.png',
     repot: 'https://img.icons8.com/doodle/48/potted-plant.png',
-    rotate: 'https://img.icons8.com/doodle/48/rotate-right.png',
+    rotate: 'https://img.icons8.com/doodle/48/rotate.png',
     mist: 'https://img.icons8.com/doodle/48/splash.png',
     check: 'https://img.icons8.com/doodle/48/visible--v1.png',
     change_water: 'https://img.icons8.com/doodle/48/water.png',

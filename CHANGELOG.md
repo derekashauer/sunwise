@@ -2,6 +2,12 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.9.6] - 2026-01-24
+
+### Fixed
+- Rotate task icon now uses correct URL
+- Skip task modal header now shows the task icon instead of JSON object data
+
 ## [0.9.5] - 2026-01-20
 
 ### Added
