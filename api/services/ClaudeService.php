@@ -795,12 +795,15 @@ PROMPT;
             }
         }
 
+        $location = $plantInfo['location'] ?? 'Not specified';
+        $lightCondition = $plantInfo['light_condition'] ?? 'Not specified';
+
         $prompt = <<<PROMPT
 Analyze this plant check data and provide a brief, actionable insight.
 
 Plant: {$species}
-Location: {$plantInfo['location'] ?? 'Not specified'}
-Light condition: {$plantInfo['light_condition'] ?? 'Not specified'}
+Location: {$location}
+Light condition: {$lightCondition}
 
 {$currentCheck}
 {$recentHistory}
