@@ -98,7 +98,11 @@ export const useTasksStore = defineStore('tasks', () => {
     updateTask(todayTasks.value)
     updateTask(upcomingTasks.value)
 
-    return response.task
+    // Return both task and insights
+    return {
+      task: response.task,
+      insights: response.insights || []
+    }
   }
 
   async function skipTask(taskId, reason) {

@@ -2,6 +2,16 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.11.0] - 2026-01-24
+
+### Added
+- **Smart Check Analysis** - After completing a plant check, get automatic insights:
+  - Local pattern detection for immediate alerts (pests, low health, moisture extremes)
+  - AI-powered analysis when concerning patterns are found
+  - Insights displayed with visual indicators (urgent/warning/success/info)
+  - Specific recommendations based on check data and history
+- Check completion modal now shows insights before closing
+
 ## [0.10.1] - 2026-01-24
 
 ### Fixed

@@ -71,6 +71,17 @@ interface AIServiceInterface
      * @return array|null Care info data or null on failure
      */
     public function generateSpeciesCareInfo(string $species): ?array;
+
+    /**
+     * Analyze check data for insights and recommendations
+     *
+     * @param array $checkData Current check data (moisture, health, observations)
+     * @param array $recentChecks Previous check readings for trend analysis
+     * @param array $plantInfo Plant details (species, conditions, etc.)
+     * @param array $currentTasks Current scheduled care tasks
+     * @return array|null Insight with type, message, and optional suggestion
+     */
+    public function analyzeCheckData(array $checkData, array $recentChecks, array $plantInfo, array $currentTasks): ?array;
 }
 
 /**

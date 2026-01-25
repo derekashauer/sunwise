@@ -642,6 +642,115 @@ PROMPT;
         return $this->parseJsonResponse($response);
     }
 
+    /**
+     * Analyze check data for insights
+     */
+    public function analyzeCheckData(array $checkData, array $recentChecks, array $plantInfo, array $currentTasks): ?array
+    {
+        $species = $plantInfo['species'] ?? 'Unknown plant';
+
+        // Format current check
+        $currentCheck = "Current Check:\n";
+        if (isset($checkData['moisture_level'])) {
+            $moistureLabel = $checkData['moisture_level'] <= 3 ? 'dry' : ($checkData['moisture_level'] <= 7 ? 'moist' : 'wet');
+            $currentCheck .= "- Moisture: {$checkData['moisture_level']}/10 ($moistureLabel)\n";
+        }
+        if (!empty($checkData['light_reading'])) {
+            $currentCheck .= "- Light: {$checkData['light_reading']} foot-candles\n";
+        }
+        if (isset($checkData['general_health'])) {
+            $currentCheck .= "- Health rating: {$checkData['general_health']}/5\n";
+        }
+
+        $observations = [];
+        if (!empty($checkData['new_growth'])) $observations[] = 'new growth observed';
+        if (!empty($checkData['yellowing_leaves'])) $observations[] = 'yellowing leaves';
+        if (!empty($checkData['brown_tips'])) $observations[] = 'brown tips';
+        if (!empty($checkData['pests_observed'])) {
+            $pestInfo = 'pests observed';
+            if (!empty($checkData['pest_notes'])) {
+                $pestInfo .= " ({$checkData['pest_notes']})";
+            }
+            $observations[] = $pestInfo;
+        }
+        if (!empty($checkData['dusty_dirty'])) $observations[] = 'plant is dusty/dirty';
+
+        if (!empty($observations)) {
+            $currentCheck .= "- Observations: " . implode(', ', $observations) . "\n";
+        }
+        if (!empty($checkData['notes'])) {
+            $currentCheck .= "- Notes: {$checkData['notes']}\n";
+        }
+
+        // Format recent checks for trend analysis
+        $recentHistory = "";
+        if (!empty($recentChecks)) {
+            $recentHistory = "\n\nRecent Check History (for trend analysis):\n";
+            foreach (array_slice($recentChecks, 0, 5) as $check) {
+                $date = date('M j', strtotime($check['recorded_at'] ?? $check['performed_at'] ?? 'now'));
+                $recentHistory .= "\n$date:";
+                if (isset($check['moisture_level'])) {
+                    $recentHistory .= " moisture={$check['moisture_level']}/10";
+                }
+                if (isset($check['general_health'])) {
+                    $recentHistory .= " health={$check['general_health']}/5";
+                }
+                if (!empty($check['light_reading'])) {
+                    $recentHistory .= " light={$check['light_reading']}fc";
+                }
+            }
+        }
+
+        // Format current tasks
+        $tasksInfo = "";
+        if (!empty($currentTasks)) {
+            $tasksInfo = "\n\nCurrent Care Schedule:\n";
+            foreach (array_slice($currentTasks, 0, 5) as $task) {
+                $interval = $task['recurrence_interval'] ?? '?';
+                $tasksInfo .= "- {$task['task_type']}: every {$interval} days\n";
+            }
+        }
+
+        $prompt = <<<PROMPT
+Analyze this plant check data and provide a brief, actionable insight.
+
+Plant: {$species}
+Location: {$plantInfo['location'] ?? 'Not specified'}
+Light condition: {$plantInfo['light_condition'] ?? 'Not specified'}
+
+{$currentCheck}
+{$recentHistory}
+{$tasksInfo}
+
+Based on this data, provide ONE focused insight. Consider:
+- Trends in moisture or health over time
+- Whether current care schedule seems appropriate
+- Any concerning patterns or positive signs
+- Specific actions the owner should take
+
+Respond ONLY with valid JSON:
+{
+    "type": "info|warning|success",
+    "message": "1-2 sentence insight with specific, actionable advice",
+    "suggestion": {
+        "action": "adjust_watering|adjust_light|treat_pests|clean_plant|monitor|none",
+        "details": "Specific suggestion if applicable, otherwise null"
+    }
+}
+
+Use "success" type for positive observations (new growth, improving health).
+Use "warning" for concerning patterns that need attention.
+Use "info" for neutral observations or minor suggestions.
+PROMPT;
+
+        $messages = [
+            ['role' => 'user', 'content' => $prompt]
+        ];
+
+        $response = $this->sendRequest($messages, 512);
+        return $this->parseJsonResponse($response);
+    }
+
     private function parseJsonResponse(?string $response): ?array
     {
         if (!$response) {

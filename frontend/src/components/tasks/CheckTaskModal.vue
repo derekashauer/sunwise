@@ -4,7 +4,8 @@ import { ref, computed, watch } from 'vue'
 const props = defineProps({
   task: { type: Object, required: true },
   plantName: { type: String, default: '' },
-  visible: { type: Boolean, default: false }
+  visible: { type: Boolean, default: false },
+  insights: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['close', 'complete'])
@@ -64,6 +65,34 @@ const moistureColor = computed(() => {
 
 const healthEmojis = ['danger', 'poor', 'okay', 'good', 'great']
 
+const showingInsights = computed(() => props.insights && props.insights.length > 0)
+
+function getInsightStyle(type) {
+  switch (type) {
+    case 'urgent':
+      return 'bg-red-50 border-red-200 text-red-800'
+    case 'warning':
+      return 'bg-amber-50 border-amber-200 text-amber-800'
+    case 'success':
+      return 'bg-plant-50 border-plant-200 text-plant-800'
+    default:
+      return 'bg-sky-50 border-sky-200 text-sky-800'
+  }
+}
+
+function getInsightIcon(type) {
+  switch (type) {
+    case 'urgent':
+      return '&#128680;' // 🚨
+    case 'warning':
+      return '&#9888;' // ⚠️
+    case 'success':
+      return '&#127793;' // 🌱
+    default:
+      return '&#128161;' // 💡
+  }
+}
+
 function close() {
   emit('close')
 }
@@ -119,6 +148,39 @@ async function complete() {
 
         <!-- Content -->
         <div class="flex-1 overflow-y-auto p-4 space-y-5">
+          <!-- Insights view (shown after completion) -->
+          <template v-if="showingInsights">
+            <div class="text-center py-4">
+              <div class="w-16 h-16 bg-plant-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                <span class="text-3xl">&#9989;</span>
+              </div>
+              <h3 class="text-lg font-semibold text-gray-900">Check Complete!</h3>
+              <p class="text-sm text-gray-500 mt-1">{{ plantName }}</p>
+            </div>
+
+            <div class="space-y-3">
+              <p class="text-sm font-medium text-gray-700">Insights from your check:</p>
+              <div
+                v-for="(insight, index) in insights"
+                :key="index"
+                class="rounded-xl p-4 border"
+                :class="getInsightStyle(insight.type)"
+              >
+                <div class="flex items-start gap-3">
+                  <span class="text-xl flex-shrink-0" v-html="getInsightIcon(insight.type)"></span>
+                  <div class="flex-1">
+                    <p class="font-medium text-sm">{{ insight.message }}</p>
+                    <p v-if="insight.suggestion?.details" class="text-xs mt-1 opacity-80">
+                      {{ insight.suggestion.details }}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- Form view (shown before completion) -->
+          <template v-else>
           <!-- Time display -->
           <div class="text-center text-sm text-gray-500">
             Recording at: {{ currentTime }}
@@ -277,25 +339,36 @@ async function complete() {
               placeholder="Any other observations..."
             ></textarea>
           </div>
+          </template>
         </div>
 
         <!-- Footer -->
         <div class="sticky bottom-0 bg-white border-t p-4 flex gap-3">
-          <button
-            @click="close"
-            :disabled="submitting"
-            class="flex-1 btn-secondary"
-          >
-            Cancel
-          </button>
-          <button
-            @click="complete"
-            :disabled="submitting"
-            class="flex-1 btn-primary flex items-center justify-center gap-2"
-          >
-            <span v-if="submitting" class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-            <span v-else>Complete Check</span>
-          </button>
+          <template v-if="showingInsights">
+            <button
+              @click="close"
+              class="flex-1 btn-primary"
+            >
+              Done
+            </button>
+          </template>
+          <template v-else>
+            <button
+              @click="close"
+              :disabled="submitting"
+              class="flex-1 btn-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              @click="complete"
+              :disabled="submitting"
+              class="flex-1 btn-primary flex items-center justify-center gap-2"
+            >
+              <span v-if="submitting" class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+              <span v-else>Complete Check</span>
+            </button>
+          </template>
         </div>
       </div>
     </div>

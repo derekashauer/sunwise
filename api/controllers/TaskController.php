@@ -200,8 +200,148 @@ class TaskController
         // Get updated task
         $stmt = db()->prepare('SELECT * FROM tasks WHERE id = ?');
         $stmt->execute([$taskId]);
+        $updatedTask = $stmt->fetch();
 
-        return ['task' => $stmt->fetch()];
+        // Analyze check data if this is a check task
+        $insights = [];
+        if ($task['task_type'] === 'check' && $checkData) {
+            $insights = $this->analyzeCheckData($checkData, $task['plant_id'], $userId);
+        }
+
+        $response = ['task' => $updatedTask];
+        if (!empty($insights)) {
+            $response['insights'] = $insights;
+        }
+
+        return $response;
+    }
+
+    /**
+     * Analyze check data for concerning patterns
+     */
+    private function analyzeCheckData(array $checkData, int $plantId, int $userId): array
+    {
+        $insights = [];
+        $triggerAI = false;
+        $concernCount = 0;
+
+        // Local pattern detection - immediate alerts
+
+        // Pests detected - urgent
+        if (!empty($checkData['pests_observed'])) {
+            $pestMsg = 'Pests detected!';
+            if (!empty($checkData['pest_notes'])) {
+                $pestMsg .= ' (' . $checkData['pest_notes'] . ')';
+            }
+            $pestMsg .= ' Consider treatment options.';
+            $insights[] = ['type' => 'urgent', 'message' => $pestMsg];
+            $triggerAI = true;
+            $concernCount++;
+        }
+
+        // Low health rating - warning
+        $health = $checkData['general_health'] ?? 5;
+        if ($health <= 2) {
+            $insights[] = ['type' => 'warning', 'message' => 'Plant health is poor. Consider reviewing care routine and environment.'];
+            $triggerAI = true;
+            $concernCount++;
+        } elseif ($health === 3) {
+            $concernCount++;
+        }
+
+        // Moisture extremes
+        $moisture = $checkData['moisture_level'] ?? 5;
+        if ($moisture <= 2) {
+            $insights[] = ['type' => 'info', 'message' => 'Soil is very dry. May need watering soon.'];
+            $concernCount++;
+        } elseif ($moisture >= 9) {
+            $insights[] = ['type' => 'warning', 'message' => 'Soil is very wet. Watch for signs of overwatering.'];
+            $concernCount++;
+        }
+
+        // Stress indicators
+        if (!empty($checkData['yellowing_leaves'])) {
+            $insights[] = ['type' => 'info', 'message' => 'Yellowing leaves may indicate overwatering, nutrient deficiency, or natural aging.'];
+            $concernCount++;
+        }
+
+        if (!empty($checkData['brown_tips'])) {
+            $insights[] = ['type' => 'info', 'message' => 'Brown leaf tips often indicate low humidity, underwatering, or salt buildup.'];
+            $concernCount++;
+        }
+
+        // Multiple concerns warrant AI analysis
+        if ($concernCount >= 2) {
+            $triggerAI = true;
+        }
+
+        // Trigger AI analysis for deeper insights if needed
+        if ($triggerAI) {
+            try {
+                $aiInsight = $this->getAICheckInsight($checkData, $plantId, $userId);
+                if ($aiInsight) {
+                    $insights[] = $aiInsight;
+                }
+            } catch (Exception $e) {
+                error_log('AI check analysis failed: ' . $e->getMessage());
+                // Don't fail the whole response if AI fails
+            }
+        }
+
+        // Positive feedback if everything looks good
+        if (empty($insights) && $health >= 4 && !empty($checkData['new_growth'])) {
+            $insights[] = ['type' => 'success', 'message' => 'Plant is thriving! New growth observed and health looks great.'];
+        }
+
+        return $insights;
+    }
+
+    /**
+     * Get AI-powered insight for check data
+     */
+    private function getAICheckInsight(array $checkData, int $plantId, int $userId): ?array
+    {
+        // Get plant info
+        $stmt = db()->prepare('SELECT name, species, notes FROM plants WHERE id = ?');
+        $stmt->execute([$plantId]);
+        $plant = $stmt->fetch();
+
+        if (!$plant) {
+            return null;
+        }
+
+        // Get recent check history
+        $stmt = db()->prepare('
+            SELECT check_data, performed_at
+            FROM care_log
+            WHERE plant_id = ? AND action = "check" AND check_data IS NOT NULL
+            ORDER BY performed_at DESC
+            LIMIT 5
+        ');
+        $stmt->execute([$plantId]);
+        $recentChecks = $stmt->fetchAll();
+
+        // Get current care tasks
+        $stmt = db()->prepare('
+            SELECT task_type, due_date, recurrence
+            FROM tasks
+            WHERE plant_id = ? AND completed_at IS NULL
+            ORDER BY due_date
+            LIMIT 10
+        ');
+        $stmt->execute([$plantId]);
+        $currentTasks = $stmt->fetchAll();
+
+        // Use user's configured AI service
+        $aiService = AIServiceFactory::getForUser($userId);
+        $result = $aiService->analyzeCheckData($checkData, $recentChecks, $plant, $currentTasks);
+
+        if ($result) {
+            ClaudeService::logUsage($userId, 'check_analysis', true, null, $aiService->getModel());
+            return $result;
+        }
+
+        return null;
     }
 
     /**

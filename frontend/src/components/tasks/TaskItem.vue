@@ -31,6 +31,7 @@ const showSkipModal = ref(false)
 const showImageModal = ref(false)
 const showCareInfoModal = ref(false)
 const showCheckModal = ref(false)
+const checkInsights = ref([])
 const skipReason = ref('')
 const customSkipReason = ref('')
 const skipping = ref(false)
@@ -130,14 +131,29 @@ async function handleCheckComplete(checkData) {
   if (loading.value || props.completed) return
   loading.value = true
   try {
-    await tasks.completeCheckTask(props.task.id, checkData)
+    const result = await tasks.completeCheckTask(props.task.id, checkData)
     window.$toast?.success('Check completed!')
-    showCheckModal.value = false
-    emit('completed', props.task)
+
+    // If there are insights, pass them to the modal to display
+    if (result.insights && result.insights.length > 0) {
+      checkInsights.value = result.insights
+    } else {
+      showCheckModal.value = false
+      emit('completed', props.task)
+    }
   } catch (error) {
     window.$toast?.error(error.message)
   } finally {
     loading.value = false
+  }
+}
+
+function handleCheckModalClose() {
+  showCheckModal.value = false
+  checkInsights.value = []
+  // If insights were shown, emit completed now
+  if (props.task.completed_at || loading.value === false) {
+    emit('completed', props.task)
   }
 }
 
@@ -581,7 +597,8 @@ async function applyScheduleAdjustment() {
       :task="task"
       :plant-name="plant?.name || task.plant_name"
       :visible="showCheckModal"
-      @close="showCheckModal = false"
+      :insights="checkInsights"
+      @close="handleCheckModalClose"
       @complete="handleCheckComplete"
     />
   </div>
