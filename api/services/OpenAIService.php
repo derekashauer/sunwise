@@ -351,7 +351,11 @@ Respond ONLY with valid JSON:
 Include 3-5 different task types. Set reasonable intervals based on plant type and season.
 
 IMPORTANT for propagations:
-- If this is a propagation in water, use "change_water" instead of "water" (every 3-7 days)
+- Check the "Growing medium" field to determine the correct task type:
+  - If Growing medium is "Water" → use "change_water" task (NOT "water") every 3-7 days
+  - If Growing medium is "Rooting medium" or any soil type → use "water" task (NOT "change_water")
+- NEVER use "change_water" for soil/rooting medium propagations
+- NEVER use "water" for water propagations
 - Add "check_roots" tasks to monitor root development
 - Add "pot_up" task when roots should be ready (usually 4-8 weeks)
 - Skip fertilizing until roots are established
