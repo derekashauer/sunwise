@@ -4,6 +4,8 @@ import { ref, computed, watch } from 'vue'
 const props = defineProps({
   task: { type: Object, required: true },
   plantName: { type: String, default: '' },
+  plantSpecies: { type: String, default: '' },
+  plantLightCondition: { type: String, default: '' },
   visible: { type: Boolean, default: false },
   insights: { type: Array, default: () => [] }
 })
@@ -66,6 +68,66 @@ const moistureColor = computed(() => {
 const healthEmojis = ['danger', 'poor', 'okay', 'good', 'great']
 
 const showingInsights = computed(() => props.insights && props.insights.length > 0)
+
+// Light level ranges in foot-candles for different plant types
+const lightRanges = {
+  low: {
+    label: 'Low Light',
+    ideal: '50-250',
+    ranges: [
+      { label: 'Too low', range: '< 50', color: 'text-amber-600' },
+      { label: 'Ideal', range: '50-250', color: 'text-plant-600' },
+      { label: 'Acceptable', range: '250-500', color: 'text-sky-600' },
+      { label: 'Too bright', range: '> 500', color: 'text-red-500' }
+    ]
+  },
+  medium: {
+    label: 'Medium Light',
+    ideal: '250-1000',
+    ranges: [
+      { label: 'Too low', range: '< 100', color: 'text-amber-600' },
+      { label: 'Low', range: '100-250', color: 'text-sky-600' },
+      { label: 'Ideal', range: '250-1000', color: 'text-plant-600' },
+      { label: 'High (ok)', range: '1000-2000', color: 'text-sky-600' }
+    ]
+  },
+  high: {
+    label: 'High Light',
+    ideal: '1000-2000+',
+    ranges: [
+      { label: 'Too low', range: '< 500', color: 'text-amber-600' },
+      { label: 'Low', range: '500-1000', color: 'text-sky-600' },
+      { label: 'Ideal', range: '1000-2000', color: 'text-plant-600' },
+      { label: 'Bright', range: '> 2000', color: 'text-sunny-600' }
+    ]
+  },
+  'full sun': {
+    label: 'Full Sun',
+    ideal: '2000-5000+',
+    ranges: [
+      { label: 'Too low', range: '< 1000', color: 'text-amber-600' },
+      { label: 'Moderate', range: '1000-2000', color: 'text-sky-600' },
+      { label: 'Good', range: '2000-5000', color: 'text-plant-600' },
+      { label: 'Direct sun', range: '> 5000', color: 'text-sunny-600' }
+    ]
+  }
+}
+
+// General ranges when no plant-specific data
+const generalLightRanges = [
+  { label: 'Low', range: '50-250 fc', description: 'Shade-tolerant plants' },
+  { label: 'Medium', range: '250-1000 fc', description: 'Most houseplants' },
+  { label: 'High', range: '1000-2000 fc', description: 'Bright indirect' },
+  { label: 'Direct', range: '2000+ fc', description: 'Full sun plants' }
+]
+
+const plantLightInfo = computed(() => {
+  const condition = props.plantLightCondition?.toLowerCase()
+  if (condition && lightRanges[condition]) {
+    return lightRanges[condition]
+  }
+  return null
+})
 
 function getInsightStyle(type) {
   switch (type) {
@@ -232,6 +294,38 @@ async function complete() {
               class="input"
             >
             <p class="text-xs text-gray-400 mt-1">Foot-candles from your light meter</p>
+
+            <!-- Light range guidance -->
+            <div class="mt-3 bg-cream-50 rounded-xl p-3 border border-cream-200">
+              <!-- Plant-specific ranges when available -->
+              <div v-if="plantLightInfo">
+                <p class="text-xs font-medium text-gray-600 mb-2">
+                  {{ plantSpecies || plantName }} prefers {{ plantLightInfo.label.toLowerCase() }}
+                  <span class="text-plant-600">({{ plantLightInfo.ideal }} fc ideal)</span>
+                </p>
+                <div class="flex flex-wrap gap-1.5">
+                  <span
+                    v-for="range in plantLightInfo.ranges"
+                    :key="range.label"
+                    class="text-xs px-2 py-0.5 rounded-full bg-white border"
+                    :class="range.color"
+                  >
+                    {{ range.label }}: {{ range.range }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- General ranges when no plant-specific data -->
+              <div v-else>
+                <p class="text-xs font-medium text-gray-600 mb-2">General light ranges:</p>
+                <div class="grid grid-cols-2 gap-1.5 text-xs">
+                  <div v-for="range in generalLightRanges" :key="range.label" class="flex items-center gap-1">
+                    <span class="font-medium text-gray-700">{{ range.label }}:</span>
+                    <span class="text-gray-500">{{ range.range }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Observations -->

@@ -2,6 +2,14 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.11.1] - 2026-01-28
+
+### Added
+- **Light range guidance in check tasks** - When entering a light meter reading, see recommended foot-candle ranges:
+  - Plant-specific ranges based on light condition (low/medium/high/full sun)
+  - Shows ideal range plus too-low/acceptable/too-bright thresholds
+  - Falls back to general ranges when plant light preference is unknown
+
 ## [0.11.0] - 2026-01-24
 
 ### Added

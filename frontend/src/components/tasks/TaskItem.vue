@@ -596,6 +596,8 @@ async function applyScheduleAdjustment() {
     <CheckTaskModal
       :task="task"
       :plant-name="plant?.name || task.plant_name"
+      :plant-species="plant?.species || task.plant_species"
+      :plant-light-condition="plant?.light_condition || task.plant_light_condition"
       :visible="showCheckModal"
       :insights="checkInsights"
       @close="handleCheckModalClose"

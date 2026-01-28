@@ -57,6 +57,8 @@ class TaskController
             SELECT t.*,
                    p.name as plant_name,
                    p.location as plant_location,
+                   p.species as plant_species,
+                   p.light_condition as plant_light_condition,
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail,
                    CASE WHEN p.user_id = {$userId} THEN 1 ELSE 0 END as is_owned,
                    CASE WHEN t.completed_by_user_id IS NOT NULL THEN
@@ -319,7 +321,17 @@ class TaskController
             LIMIT 5
         ');
         $stmt->execute([$plantId]);
-        $recentChecks = $stmt->fetchAll();
+        $rawChecks = $stmt->fetchAll();
+
+        // Decode JSON check_data for each record
+        $recentChecks = [];
+        foreach ($rawChecks as $check) {
+            $decoded = json_decode($check['check_data'], true);
+            if ($decoded) {
+                $decoded['performed_at'] = $check['performed_at'];
+                $recentChecks[] = $decoded;
+            }
+        }
 
         // Get current care tasks
         $stmt = db()->prepare('
@@ -330,7 +342,18 @@ class TaskController
             LIMIT 10
         ');
         $stmt->execute([$plantId]);
-        $currentTasks = $stmt->fetchAll();
+        $rawTasks = $stmt->fetchAll();
+
+        // Extract recurrence_interval from JSON recurrence field
+        $currentTasks = [];
+        foreach ($rawTasks as $task) {
+            $recurrence = json_decode($task['recurrence'], true);
+            $currentTasks[] = [
+                'task_type' => $task['task_type'],
+                'due_date' => $task['due_date'],
+                'recurrence_interval' => $recurrence['interval'] ?? null
+            ];
+        }
 
         // Use user's configured AI service
         $aiService = AIServiceFactory::getForUser($userId);
