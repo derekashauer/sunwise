@@ -353,7 +353,7 @@ class PlantController
         }
 
         // Build update query dynamically
-        $allowedFields = ['name', 'species', 'pot_size', 'soil_type', 'light_condition', 'location_id', 'notes', 'health_status', 'parent_plant_id', 'propagation_date', 'is_propagation', 'has_grow_light', 'grow_light_hours'];
+        $allowedFields = ['name', 'species', 'pot_size', 'soil_type', 'light_condition', 'location_id', 'notes', 'health_status', 'parent_plant_id', 'propagation_date', 'is_propagation', 'has_grow_light', 'grow_light_hours', 'baseline_light_reading'];
         $updates = [];
         $values = [];
 

@@ -18,6 +18,7 @@ const inputMessage = ref('')
 const loading = ref(false)
 const loadingHistory = ref(true)
 const pendingActions = ref([])
+const applyingAction = ref(null) // Track which action is being applied
 const messagesContainer = ref(null)
 
 // AI provider settings
@@ -117,6 +118,7 @@ async function sendMessage() {
 }
 
 async function applyAction(action) {
+  applyingAction.value = action
   try {
     const response = await api.post(`/plants/${props.plant.id}/chat/apply-action`, { action })
     if (response.success) {
@@ -128,6 +130,8 @@ async function applyAction(action) {
     }
   } catch (e) {
     window.$toast?.error(e.message)
+  } finally {
+    applyingAction.value = null
   }
 }
 
@@ -248,6 +252,7 @@ const canUseProvider = computed(() => {
             v-for="(action, index) in pendingActions"
             :key="index"
             :action="action"
+            :loading="applyingAction === action"
             @apply="applyAction(action)"
             @dismiss="dismissAction(action)"
           />

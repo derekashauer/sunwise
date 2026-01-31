@@ -598,6 +598,7 @@ async function applyScheduleAdjustment() {
       :plant-name="plant?.name || task.plant_name"
       :plant-species="plant?.species || task.plant_species"
       :plant-light-condition="plant?.light_condition || task.plant_light_condition"
+      :is-water-propagation="(plant?.is_propagation || task.plant_is_propagation) && (plant?.soil_type === 'water' || task.plant_soil_type === 'water')"
       :visible="showCheckModal"
       :insights="checkInsights"
       @close="handleCheckModalClose"

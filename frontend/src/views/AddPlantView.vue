@@ -54,7 +54,8 @@ const form = ref({
   parent_plant_id: null,
   has_grow_light: false,
   grow_light_hours: null,
-  has_drainage: true
+  has_drainage: true,
+  baseline_light_reading: null
 })
 
 const imageFile = ref(null)
@@ -129,7 +130,8 @@ onMounted(async () => {
         parent_plant_id: plant.parent_plant_id || null,
         has_grow_light: !!plant.has_grow_light,
         grow_light_hours: plant.grow_light_hours || null,
-        has_drainage: plant.has_drainage !== 0
+        has_drainage: plant.has_drainage !== 0,
+        baseline_light_reading: plant.baseline_light_reading || null
       }
       if (plant.thumbnail) {
         imagePreview.value = `/uploads/plants/${plant.thumbnail}`
@@ -236,26 +238,27 @@ async function handleSubmit() {
       return
     } else {
       const plant = await plants.createPlant(formData)
-      window.$toast?.success('Plant added! AI is analyzing...')
 
-      // Check for species candidates after a short delay
-      setTimeout(async () => {
+      // Check if AI returned species candidates (happens synchronously in backend)
+      if (plant.species_candidates && !plant.species_confirmed) {
         try {
-          const updatedPlant = await plants.getPlant(plant.id)
-          if (updatedPlant.species_candidates && !updatedPlant.species_confirmed) {
-            const candidates = JSON.parse(updatedPlant.species_candidates)
-            if (candidates.length >= 1) {
-              speciesCandidates.value = candidates
-              pendingPlantId.value = plant.id
-              showSpeciesPicker.value = true
-              return
-            }
+          const candidates = JSON.parse(plant.species_candidates)
+          if (candidates.length >= 1) {
+            window.$toast?.success('Plant added! Please confirm the species.')
+            speciesCandidates.value = candidates
+            pendingPlantId.value = plant.id
+            showSpeciesPicker.value = true
+            loading.value = false
+            return
           }
         } catch (e) {
-          console.error('Failed to check species candidates:', e)
+          console.error('Failed to parse species candidates:', e)
         }
-        router.replace(`/plants/${plant.id}`)
-      }, 3000)
+      }
+
+      // No candidates or already confirmed - go to plant detail
+      window.$toast?.success('Plant added!')
+      router.replace(`/plants/${plant.id}`)
       return
     }
 
@@ -590,6 +593,42 @@ function skipCarePlanUpdate() {
               {{ light.label }}
             </span>
           </button>
+        </div>
+      </div>
+
+      <!-- Light Meter Reading (optional) -->
+      <div class="p-4 rounded-xl border-2 border-gray-200 space-y-3">
+        <div class="flex items-start gap-3">
+          <img
+            src="https://img.icons8.com/doodle/48/brightness.png"
+            alt=""
+            class="w-6 h-6 mt-0.5"
+          >
+          <div class="flex-1">
+            <label for="light-reading" class="block text-sm font-medium text-gray-700">Baseline Light Reading (optional)</label>
+            <p class="text-xs text-gray-500 mt-0.5">Midday reading in foot-candles helps optimize care schedules</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <input
+            id="light-reading"
+            type="number"
+            v-model="form.baseline_light_reading"
+            min="0"
+            max="10000"
+            class="input w-32"
+            placeholder="e.g., 500"
+          >
+          <span class="text-sm text-gray-500">fc</span>
+        </div>
+        <div class="bg-cream-50 rounded-lg p-2 text-xs text-gray-600">
+          <p class="font-medium mb-1">Typical ranges:</p>
+          <div class="grid grid-cols-2 gap-x-4 gap-y-0.5">
+            <span>Low light: 50-250 fc</span>
+            <span>Medium: 250-1000 fc</span>
+            <span>Bright indirect: 1000-2000 fc</span>
+            <span>Direct sun: 2000+ fc</span>
+          </div>
         </div>
       </div>
 

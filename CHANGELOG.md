@@ -2,6 +2,19 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.12.0] - 2026-01-30
+
+### Added
+- **Baseline light meter reading** - Add optional foot-candle reading when creating or editing plants:
+  - Helps AI optimize care schedules based on actual light measurements
+  - Shows reference ranges for low, medium, bright, and direct light
+  - New database field `baseline_light_reading` for plants
+
+### Fixed
+- **Propagation care plan for soil propagations** - Fixed issue where soil-based propagations (rooting medium) could incorrectly get "change water" tasks:
+  - AI now explicitly knows if propagation is in water or soil
+  - Soil propagations correctly get "water" tasks instead of "change_water"
+
 ## [0.11.1] - 2026-01-28
 
 ### Added

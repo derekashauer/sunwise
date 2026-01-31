@@ -105,6 +105,23 @@ function close() {
               </h4>
               <div class="bg-gray-50 rounded-xl p-3 space-y-2 text-sm">
                 <p><span class="font-medium">Ideal:</span> {{ careInfo.light.ideal }}</p>
+
+                <!-- Foot-candle ranges -->
+                <div v-if="careInfo.light.foot_candles" class="bg-sunny-50 rounded-lg p-2 border border-sunny-100">
+                  <p class="text-xs font-medium text-sunny-800 mb-1">Light meter readings (foot-candles):</p>
+                  <div class="flex flex-wrap gap-2 text-xs">
+                    <span class="px-2 py-0.5 bg-white rounded border text-gray-600">
+                      Min: {{ careInfo.light.foot_candles.low }} fc
+                    </span>
+                    <span class="px-2 py-0.5 bg-plant-100 rounded border border-plant-200 text-plant-700 font-medium">
+                      Ideal: {{ careInfo.light.foot_candles.ideal_min }}-{{ careInfo.light.foot_candles.ideal_max }} fc
+                    </span>
+                    <span class="px-2 py-0.5 bg-white rounded border text-gray-600">
+                      Max: {{ careInfo.light.foot_candles.max }} fc
+                    </span>
+                  </div>
+                </div>
+
                 <p v-if="careInfo.light.tolerance"><span class="font-medium">Tolerance:</span> {{ careInfo.light.tolerance }}</p>
                 <div v-if="careInfo.light.signs_of_too_much || careInfo.light.signs_of_too_little" class="pt-2 border-t border-gray-200">
                   <p v-if="careInfo.light.signs_of_too_much" class="text-amber-700">

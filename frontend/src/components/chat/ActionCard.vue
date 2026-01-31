@@ -2,7 +2,8 @@
 import { computed } from 'vue'
 
 const props = defineProps({
-  action: { type: Object, required: true }
+  action: { type: Object, required: true },
+  loading: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['apply', 'dismiss'])
@@ -66,12 +67,18 @@ const actionIcon = computed(() => {
         <div class="flex gap-2 mt-3">
           <button
             @click="emit('apply')"
-            class="btn-primary text-sm px-3 py-1.5"
+            :disabled="loading"
+            class="btn-primary text-sm px-3 py-1.5 min-w-[70px]"
           >
-            Apply
+            <span v-if="loading" class="flex items-center justify-center gap-1">
+              <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              Applying...
+            </span>
+            <span v-else>Apply</span>
           </button>
           <button
             @click="emit('dismiss')"
+            :disabled="loading"
             class="btn-secondary text-sm px-3 py-1.5"
           >
             Dismiss

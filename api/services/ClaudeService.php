@@ -183,10 +183,13 @@ PROMPT;
             if (!empty($plant['propagation_date'])) {
                 $plantInfo .= "\nPropagation started: " . $plant['propagation_date'];
             }
+            // Always specify growing medium for propagations
             if ($plant['soil_type'] === 'water') {
                 $plantInfo .= "\nGrowing medium: Water (water propagation)";
-            } elseif ($plant['soil_type'] === 'rooting') {
-                $plantInfo .= "\nGrowing medium: Rooting medium";
+            } else {
+                // Rooting medium, soil, or any other type - all treated as soil-based propagation
+                $mediumLabel = $plant['soil_type'] === 'rooting' ? 'Rooting medium' : 'Soil (' . $plant['soil_type'] . ')';
+                $plantInfo .= "\nGrowing medium: " . $mediumLabel . " (soil propagation - NOT water)";
             }
         }
 
@@ -501,8 +504,12 @@ INST;
             if (!empty($plant['propagation_date'])) {
                 $prompt .= "**Propagation Started**: " . $plant['propagation_date'] . "\n";
             }
+            // Always specify medium for propagations
             if ($plant['soil_type'] === 'water') {
                 $prompt .= "**Medium**: Water propagation\n";
+            } else {
+                $mediumLabel = $plant['soil_type'] === 'rooting' ? 'Rooting medium' : 'Soil';
+                $prompt .= "**Medium**: " . $mediumLabel . " (soil propagation)\n";
             }
         }
 
@@ -668,6 +675,12 @@ Respond ONLY with valid JSON in this exact format:
     "origin": "Native region/habitat",
     "light": {
         "ideal": "Description of ideal light conditions",
+        "foot_candles": {
+            "low": 50,
+            "ideal_min": 200,
+            "ideal_max": 500,
+            "max": 1000
+        },
         "tolerance": "What light levels it can tolerate",
         "signs_of_too_much": "Signs of too much light",
         "signs_of_too_little": "Signs of insufficient light"

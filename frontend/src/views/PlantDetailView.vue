@@ -148,6 +148,44 @@ const upcomingTasks = computed(() => tasks.value.filter(t => !t.completed_at))
 
 const isArchived = computed(() => !!plant.value?.archived_at)
 
+// Extract care schedule summary from tasks
+const careScheduleSummary = computed(() => {
+  const schedules = {}
+  const taskLabels = {
+    water: 'Water',
+    fertilize: 'Fertilize',
+    check: 'Check',
+    mist: 'Mist',
+    rotate: 'Rotate',
+    trim: 'Trim',
+    repot: 'Repot',
+    change_water: 'Change water',
+    check_roots: 'Check roots',
+    pot_up: 'Pot up'
+  }
+
+  // Get unique task types with their recurrence
+  for (const task of tasks.value) {
+    if (!task.recurrence || schedules[task.task_type]) continue
+    try {
+      const recurrence = typeof task.recurrence === 'string'
+        ? JSON.parse(task.recurrence)
+        : task.recurrence
+      if (recurrence?.interval) {
+        schedules[task.task_type] = {
+          label: taskLabels[task.task_type] || task.task_type,
+          interval: recurrence.interval,
+          type: recurrence.type || 'days'
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse recurrence:', e)
+    }
+  }
+
+  return Object.values(schedules)
+})
+
 const filteredCareLog = computed(() => {
   if (!careLogFilter.value) return careLog.value
   return careLog.value.filter(e => e.action === careLogFilter.value)
@@ -542,6 +580,24 @@ function shareToWhatsApp() {
       <!-- Care Plan Schedule (hide for archived) -->
       <div v-if="!isArchived" class="mb-6">
         <h2 class="font-semibold text-gray-900 mb-3">Care Schedule</h2>
+
+        <!-- Schedule Summary -->
+        <div v-if="careScheduleSummary.length > 0" class="flex flex-wrap gap-2 mb-3">
+          <span
+            v-for="schedule in careScheduleSummary"
+            :key="schedule.label"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-plant-50 text-plant-700 rounded-full text-sm border border-plant-100"
+          >
+            <span class="font-medium">{{ schedule.label }}</span>
+            <span class="text-plant-500">every {{ schedule.interval }} {{ schedule.type }}</span>
+          </span>
+        </div>
+
+        <!-- AI Reasoning (if available) -->
+        <div v-if="carePlan?.ai_reasoning" class="bg-cream-50 rounded-xl p-3 mb-3 border border-cream-200">
+          <p class="text-sm text-charcoal-600">{{ carePlan.ai_reasoning }}</p>
+        </div>
+
         <div v-if="upcomingTasks.length > 0" class="card divide-y">
           <div
             v-for="task in upcomingTasks"

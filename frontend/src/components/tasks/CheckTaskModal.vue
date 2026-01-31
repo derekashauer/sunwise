@@ -6,6 +6,7 @@ const props = defineProps({
   plantName: { type: String, default: '' },
   plantSpecies: { type: String, default: '' },
   plantLightCondition: { type: String, default: '' },
+  isWaterPropagation: { type: Boolean, default: false },
   visible: { type: Boolean, default: false },
   insights: { type: Array, default: () => [] }
 })
@@ -164,7 +165,7 @@ async function complete() {
   submitting.value = true
 
   const checkData = {
-    moisture_level: moistureLevel.value,
+    moisture_level: props.isWaterPropagation ? null : moistureLevel.value,
     light_reading: lightReading.value ? parseInt(lightReading.value) : null,
     recorded_at: new Date().toISOString(),
     new_growth: newGrowth.value,
@@ -248,8 +249,8 @@ async function complete() {
             Recording at: {{ currentTime }}
           </div>
 
-          <!-- Moisture Level -->
-          <div>
+          <!-- Moisture Level (hide for water propagations) -->
+          <div v-if="!isWaterPropagation">
             <label class="block text-sm font-medium text-gray-700 mb-2">
               Moisture Level
             </label>
@@ -278,6 +279,10 @@ async function complete() {
                 </div>
               </div>
             </div>
+          </div>
+          <!-- Water propagation notice -->
+          <div v-else class="bg-sky-50 rounded-xl p-3 border border-sky-100">
+            <p class="text-sm text-sky-700">Water propagation - no soil moisture to measure</p>
           </div>
 
           <!-- Light Reading -->
