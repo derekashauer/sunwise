@@ -240,6 +240,11 @@ class CarePlanController
                     continue;
                 }
 
+                // Skip rotate tasks if plant's can_rotate is false
+                if ($task['type'] === 'rotate' && isset($plant['can_rotate']) && !$plant['can_rotate']) {
+                    continue;
+                }
+
                 $stmt = db()->prepare('
                     INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, instructions, priority)
                     VALUES (?, ?, ?, ?, ?, ?, ?)

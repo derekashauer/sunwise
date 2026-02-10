@@ -297,6 +297,112 @@ class CronController
     }
 
     /**
+     * Evaluate care plans and regenerate stale or problematic ones
+     * GET /cron/evaluate-plans?key=SECRET
+     *
+     * Should be called weekly, e.g.:
+     * 0 3 * * 0 curl -s "https://dereka328.sg-host.com/api/cron/evaluate-plans?key=YOUR_SECRET"
+     */
+    public function evaluatePlans(array $params, array $body, ?int $userId): array
+    {
+        if (!$this->validateCronKey($params)) {
+            return ['status' => 403, 'data' => ['error' => 'Invalid cron key']];
+        }
+
+        $regenerated = 0;
+        $skipped = 0;
+        $errors = [];
+
+        // Find plants that need care plan evaluation:
+        // 1. Plan expired (valid_until passed)
+        // 2. Plan is old (generated over 60 days ago)
+        // 3. No pending tasks (all completed/skipped, plan may be "half baked")
+        // 4. Season changed since plan was generated
+        $today = date('Y-m-d');
+        $month = (int) date('n');
+        if ($month >= 3 && $month <= 5) {
+            $currentSeason = 'spring';
+        } elseif ($month >= 6 && $month <= 8) {
+            $currentSeason = 'summer';
+        } elseif ($month >= 9 && $month <= 11) {
+            $currentSeason = 'fall';
+        } else {
+            $currentSeason = 'winter';
+        }
+
+        $stmt = db()->query("
+            SELECT cp.id as care_plan_id, cp.plant_id, cp.season, cp.valid_until, cp.generated_at,
+                   p.user_id, p.name as plant_name,
+                   (SELECT COUNT(*) FROM tasks t
+                    WHERE t.care_plan_id = cp.id AND t.completed_at IS NULL AND t.skipped_at IS NULL
+                   ) as pending_task_count
+            FROM care_plans cp
+            JOIN plants p ON cp.plant_id = p.id
+            WHERE cp.is_active = 1
+              AND p.archived_at IS NULL
+        ");
+        $plans = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $carePlanController = new CarePlanController();
+
+        foreach ($plans as $plan) {
+            $shouldRegenerate = false;
+            $reason = '';
+
+            // 1. Plan expired
+            if ($plan['valid_until'] && $plan['valid_until'] < $today) {
+                $shouldRegenerate = true;
+                $reason = 'Plan expired';
+            }
+
+            // 2. Plan is old (over 60 days)
+            if (!$shouldRegenerate && $plan['generated_at']) {
+                $daysSinceGenerated = (strtotime($today) - strtotime($plan['generated_at'])) / 86400;
+                if ($daysSinceGenerated > 60) {
+                    $shouldRegenerate = true;
+                    $reason = 'Plan older than 60 days';
+                }
+            }
+
+            // 3. No pending tasks left (plan is depleted)
+            if (!$shouldRegenerate && (int)$plan['pending_task_count'] === 0) {
+                $shouldRegenerate = true;
+                $reason = 'No pending tasks remaining';
+            }
+
+            // 4. Season changed since plan was generated
+            if (!$shouldRegenerate && $plan['season'] !== $currentSeason) {
+                $shouldRegenerate = true;
+                $reason = "Season changed from {$plan['season']} to {$currentSeason}";
+            }
+
+            if ($shouldRegenerate) {
+                try {
+                    $carePlanController->generateCarePlan($plan['plant_id'], $plan['user_id']);
+                    $regenerated++;
+                    error_log("Cron: Regenerated care plan for plant {$plan['plant_name']} (ID: {$plan['plant_id']}). Reason: {$reason}");
+                } catch (Exception $e) {
+                    $errors[] = "Failed to regenerate plan for plant {$plan['plant_id']}: " . $e->getMessage();
+                }
+            } else {
+                $skipped++;
+            }
+        }
+
+        $this->logCronRun('evaluate_plans', $regenerated, $skipped, $errors);
+
+        return [
+            'success' => true,
+            'date' => $today,
+            'season' => $currentSeason,
+            'plans_evaluated' => count($plans),
+            'plans_regenerated' => $regenerated,
+            'skipped' => $skipped,
+            'errors' => $errors
+        ];
+    }
+
+    /**
      * Test endpoint - send a test email to a specific user
      * GET /cron/test-email?key=SECRET&email=user@example.com
      * Protected by cron key (for testing via URL)

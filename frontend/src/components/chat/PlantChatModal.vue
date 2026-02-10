@@ -298,5 +298,8 @@ const canUseProvider = computed(() => {
 
     <!-- Loading overlay for AI response -->
     <LoadingOverlay :visible="loading" message="Thinking about your plant..." />
+
+    <!-- Loading overlay for applying action -->
+    <LoadingOverlay :visible="!!applyingAction" message="Applying changes..." />
   </div>
 </template>

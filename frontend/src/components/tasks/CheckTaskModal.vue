@@ -285,53 +285,8 @@ async function complete() {
             <p class="text-sm text-sky-700">Water propagation - no soil moisture to measure</p>
           </div>
 
-          <!-- Light Reading -->
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">
-              Light Reading - fc (optional)
-            </label>
-            <input
-              v-model="lightReading"
-              type="number"
-              min="0"
-              max="10000"
-              placeholder="e.g., 850"
-              class="input"
-            >
-            <p class="text-xs text-gray-400 mt-1">Foot-candles from your light meter</p>
-
-            <!-- Light range guidance -->
-            <div class="mt-3 bg-cream-50 rounded-xl p-3 border border-cream-200">
-              <!-- Plant-specific ranges when available -->
-              <div v-if="plantLightInfo">
-                <p class="text-xs font-medium text-gray-600 mb-2">
-                  {{ plantSpecies || plantName }} prefers {{ plantLightInfo.label.toLowerCase() }}
-                  <span class="text-plant-600">({{ plantLightInfo.ideal }} fc ideal)</span>
-                </p>
-                <div class="flex flex-wrap gap-1.5">
-                  <span
-                    v-for="range in plantLightInfo.ranges"
-                    :key="range.label"
-                    class="text-xs px-2 py-0.5 rounded-full bg-white border"
-                    :class="range.color"
-                  >
-                    {{ range.label }}: {{ range.range }}
-                  </span>
-                </div>
-              </div>
-
-              <!-- General ranges when no plant-specific data -->
-              <div v-else>
-                <p class="text-xs font-medium text-gray-600 mb-2">General light ranges:</p>
-                <div class="grid grid-cols-2 gap-1.5 text-xs">
-                  <div v-for="range in generalLightRanges" :key="range.label" class="flex items-center gap-1">
-                    <span class="font-medium text-gray-700">{{ range.label }}:</span>
-                    <span class="text-gray-500">{{ range.range }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <!-- Light Reading (hidden - now set on plant add/edit instead) -->
+          <input type="hidden" v-model="lightReading" />
 
           <!-- Observations -->
           <div>

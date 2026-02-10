@@ -201,6 +201,7 @@ $routes = [
 
     // Cron routes (no auth, but protected by secret key in query param)
     'GET /cron/daily-reminders' => ['CronController', 'dailyReminders'],
+    'GET /cron/evaluate-plans' => ['CronController', 'evaluatePlans'],
     'GET /cron/status' => ['CronController', 'status', true],
     'GET /cron/test-email' => ['CronController', 'testEmail', true],
 

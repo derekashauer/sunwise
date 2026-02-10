@@ -2,6 +2,34 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.13.0] - 2026-02-08
+
+### Added
+- **Plant rotation setting** - Option to disable rotation tasks for plants that don't need it (hanging plants, symmetrical plants):
+  - New "Needs rotation for even growth" checkbox on add/edit plant
+  - AI care plans respect the setting and skip rotate tasks when disabled
+  - New database column `can_rotate` on plants table
+- **Rebuild care plan button** - One-tap button on plant detail page to trigger AI care plan regeneration
+- **Scheduled care plan evaluations** - New weekly cron job (`/cron/evaluate-plans`) that automatically regenerates stale care plans:
+  - Catches expired plans (past valid_until date)
+  - Refreshes old plans (over 60 days)
+  - Rebuilds depleted plans (no pending tasks remaining)
+  - Updates plans when season changes
+- **Auto care plan updates on check** - Check task completion now triggers automatic care plan regeneration when:
+  - Soil is very dry but watering is scheduled far in the future
+  - Soil is very wet with watering scheduled soon
+  - Plant health is critical or pests are detected
+- **Chat action loading indicator** - Loading overlay shows "Applying changes..." when applying suggested actions from AI chat
+
+### Changed
+- **Disabled task types now hidden from all views** - When a task type is disabled in settings (e.g., misting), those tasks are filtered from today's tasks, upcoming tasks, and plant task lists. Tasks remain in the database so re-enabling shows them again.
+- **Care schedule section redesigned** - Shows next due dates per task type with overdue highlighting
+- Light meter reading moved from check tasks to plant add/edit (where it belongs)
+
+### Fixed
+- **OpenAI species identification missing candidates** - Fixed bug where OpenAI users never saw the species picker with confidence levels (the `candidates` array was missing from the prompt)
+- **PlantController INSERT missing fields** - `baseline_light_reading` and `can_rotate` were missing from the plant INSERT statement
+
 ## [0.12.0] - 2026-01-30
 
 ### Added

@@ -46,12 +46,36 @@ class TaskController
     }
 
     /**
+     * Get disabled task types for a user
+     */
+    private function getDisabledTaskTypes(int $userId): array
+    {
+        $stmt = db()->prepare('SELECT task_type FROM task_type_settings WHERE user_id = ? AND enabled = 0');
+        $stmt->execute([$userId]);
+        return $stmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    /**
+     * Build SQL exclusion clause for disabled task types
+     */
+    private function getDisabledTaskTypeCondition(int $userId): string
+    {
+        $disabled = $this->getDisabledTaskTypes($userId);
+        if (empty($disabled)) {
+            return '1=1';
+        }
+        $quoted = implode(',', array_map(fn($t) => "'" . addslashes($t) . "'", $disabled));
+        return "t.task_type NOT IN ({$quoted})";
+    }
+
+    /**
      * Get today's tasks
      */
     public function today(array $params, array $body, ?int $userId): array
     {
         $today = date('Y-m-d');
         $accessCondition = $this->getAccessiblePlantCondition($userId);
+        $taskTypeCondition = $this->getDisabledTaskTypeCondition($userId);
 
         $stmt = db()->query("
             SELECT t.*,
@@ -64,7 +88,7 @@ class TaskController
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail,
                    CASE WHEN p.user_id = {$userId} THEN 1 ELSE 0 END as is_owned,
                    CASE WHEN t.completed_by_user_id IS NOT NULL THEN
-                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1))
+                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, \'@\') - 1))
                         FROM users u WHERE u.id = t.completed_by_user_id)
                    ELSE NULL END as completed_by_name
             FROM tasks t
@@ -73,6 +97,7 @@ class TaskController
               AND t.due_date <= '{$today}'
               AND t.skipped_at IS NULL
               AND p.archived_at IS NULL
+              AND {$taskTypeCondition}
             ORDER BY
                 CASE WHEN t.completed_at IS NULL THEN 0 ELSE 1 END,
                 CASE t.priority
@@ -96,6 +121,7 @@ class TaskController
         $today = date('Y-m-d');
         $endDate = date('Y-m-d', strtotime('+7 days'));
         $accessCondition = $this->getAccessiblePlantCondition($userId);
+        $taskTypeCondition = $this->getDisabledTaskTypeCondition($userId);
 
         $stmt = db()->query("
             SELECT t.*,
@@ -112,6 +138,7 @@ class TaskController
               AND t.due_date BETWEEN '{$today}' AND '{$endDate}'
               AND t.completed_at IS NULL
               AND t.skipped_at IS NULL
+              AND {$taskTypeCondition}
             ORDER BY t.due_date ASC, t.priority ASC
         ");
 
@@ -130,20 +157,23 @@ class TaskController
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
         }
 
-        $stmt = db()->prepare('
+        $taskTypeCondition = $this->getDisabledTaskTypeCondition($userId);
+
+        $stmt = db()->prepare("
             SELECT t.*,
                    CASE WHEN t.completed_by_user_id IS NOT NULL THEN
-                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, \'@\') - 1))
+                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1))
                         FROM users u WHERE u.id = t.completed_by_user_id)
                    ELSE NULL END as completed_by_name
             FROM tasks t
             WHERE t.plant_id = ?
               AND t.skipped_at IS NULL
+              AND {$taskTypeCondition}
             ORDER BY
                 CASE WHEN t.completed_at IS NULL THEN 0 ELSE 1 END,
                 t.due_date ASC
             LIMIT 20
-        ');
+        ");
         $stmt->execute([$plantId]);
 
         return ['tasks' => $stmt->fetchAll()];
@@ -208,13 +238,19 @@ class TaskController
 
         // Analyze check data if this is a check task
         $insights = [];
+        $carePlanUpdated = false;
         if ($task['task_type'] === 'check' && $checkData) {
-            $insights = $this->analyzeCheckData($checkData, $task['plant_id'], $userId);
+            $analysisResult = $this->analyzeCheckDataAndUpdateCarePlan($checkData, $task['plant_id'], $userId);
+            $insights = $analysisResult['insights'];
+            $carePlanUpdated = $analysisResult['care_plan_updated'];
         }
 
         $response = ['task' => $updatedTask];
         if (!empty($insights)) {
             $response['insights'] = $insights;
+        }
+        if ($carePlanUpdated) {
+            $response['care_plan_updated'] = true;
         }
 
         return $response;
@@ -298,6 +334,110 @@ class TaskController
         }
 
         return $insights;
+    }
+
+    /**
+     * Analyze check data and potentially trigger care plan update
+     * This wraps analyzeCheckData and adds care plan regeneration logic
+     */
+    private function analyzeCheckDataAndUpdateCarePlan(array $checkData, int $plantId, int $userId): array
+    {
+        $insights = $this->analyzeCheckData($checkData, $plantId, $userId);
+        $carePlanUpdated = false;
+
+        // Determine if the care plan should be updated based on check data
+        $shouldUpdatePlan = false;
+
+        $moisture = $checkData['moisture_level'] ?? null;
+        $health = $checkData['general_health'] ?? 3;
+
+        // Very dry soil (moisture <= 2) - may need more frequent watering
+        if ($moisture !== null && $moisture <= 2) {
+            // Check if next water task is far away
+            $stmt = db()->prepare('
+                SELECT due_date FROM tasks
+                WHERE plant_id = ? AND task_type = "water" AND completed_at IS NULL AND skipped_at IS NULL
+                ORDER BY due_date ASC LIMIT 1
+            ');
+            $stmt->execute([$plantId]);
+            $nextWater = $stmt->fetch();
+
+            if ($nextWater) {
+                $daysUntilWater = (strtotime($nextWater['due_date']) - strtotime('today')) / 86400;
+                // If soil is bone dry and watering is 3+ days away, update plan
+                if ($daysUntilWater >= 3) {
+                    $shouldUpdatePlan = true;
+                    $insights[] = [
+                        'type' => 'warning',
+                        'message' => "Soil is very dry but next watering isn't for {$daysUntilWater} days. Regenerating care plan to adjust watering frequency.",
+                        'suggestion' => ['action' => 'adjust_watering', 'details' => 'Care plan will be updated with more frequent watering']
+                    ];
+                }
+            }
+        }
+
+        // Very wet soil (moisture >= 9) and watering soon - may need less frequent watering
+        if ($moisture !== null && $moisture >= 9) {
+            $stmt = db()->prepare('
+                SELECT due_date FROM tasks
+                WHERE plant_id = ? AND task_type = "water" AND completed_at IS NULL AND skipped_at IS NULL
+                ORDER BY due_date ASC LIMIT 1
+            ');
+            $stmt->execute([$plantId]);
+            $nextWater = $stmt->fetch();
+
+            if ($nextWater) {
+                $daysUntilWater = (strtotime($nextWater['due_date']) - strtotime('today')) / 86400;
+                // If soil is soaking wet and watering is within 2 days, update plan
+                if ($daysUntilWater <= 2) {
+                    $shouldUpdatePlan = true;
+                    $insights[] = [
+                        'type' => 'warning',
+                        'message' => 'Soil is very wet and watering is scheduled soon. Regenerating care plan to reduce watering frequency.',
+                        'suggestion' => ['action' => 'adjust_watering', 'details' => 'Care plan will be updated with less frequent watering']
+                    ];
+                }
+            }
+        }
+
+        // Critical health (health <= 2) or pests - always review care plan
+        if ($health <= 2 || !empty($checkData['pests_observed'])) {
+            $shouldUpdatePlan = true;
+        }
+
+        // Trigger care plan regeneration
+        if ($shouldUpdatePlan) {
+            try {
+                $carePlanController = new CarePlanController();
+                $carePlanController->generateCarePlan($plantId, $userId);
+                $carePlanUpdated = true;
+
+                if (!$this->hasInsightType($insights, 'warning') && !$this->hasInsightType($insights, 'urgent')) {
+                    $insights[] = [
+                        'type' => 'info',
+                        'message' => 'Care plan has been automatically updated based on your check data.',
+                        'suggestion' => ['action' => 'none', 'details' => null]
+                    ];
+                }
+            } catch (Exception $e) {
+                error_log('Auto care plan update failed: ' . $e->getMessage());
+            }
+        }
+
+        return ['insights' => $insights, 'care_plan_updated' => $carePlanUpdated];
+    }
+
+    /**
+     * Check if insights array contains a specific type
+     */
+    private function hasInsightType(array $insights, string $type): bool
+    {
+        foreach ($insights as $insight) {
+            if (($insight['type'] ?? '') === $type) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

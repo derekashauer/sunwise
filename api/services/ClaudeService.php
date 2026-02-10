@@ -199,6 +199,11 @@ PROMPT;
             $plantInfo .= "\nGrow light: Yes, {$hours} hours/day";
         }
 
+        // Rotation setting
+        if (isset($plant['can_rotate']) && !$plant['can_rotate']) {
+            $plantInfo .= "\nCAN ROTATE: NO - Do NOT include rotate tasks for this plant";
+        }
+
         // Species-specific care info (if available from AI identification)
         $speciesCareInfo = "";
         if (!empty($plant['known_care_needs'])) {

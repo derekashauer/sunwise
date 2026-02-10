@@ -42,6 +42,7 @@ const savingShoppingItem = ref(false)
 const showArchiveModal = ref(false)
 const archiveReason = ref('')
 const archiving = ref(false)
+const rebuildingPlan = ref(false)
 const showShareModal = ref(false)
 const linkCopied = ref(false)
 
@@ -164,19 +165,42 @@ const careScheduleSummary = computed(() => {
     pot_up: 'Pot up'
   }
 
-  // Get unique task types with their recurrence
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  // Get unique task types with their recurrence and next due date
   for (const task of tasks.value) {
-    if (!task.recurrence || schedules[task.task_type]) continue
+    if (schedules[task.task_type]) continue
     try {
-      const recurrence = typeof task.recurrence === 'string'
-        ? JSON.parse(task.recurrence)
-        : task.recurrence
-      if (recurrence?.interval) {
-        schedules[task.task_type] = {
-          label: taskLabels[task.task_type] || task.task_type,
-          interval: recurrence.interval,
-          type: recurrence.type || 'days'
-        }
+      const recurrence = task.recurrence
+        ? (typeof task.recurrence === 'string' ? JSON.parse(task.recurrence) : task.recurrence)
+        : null
+
+      // Find next uncompleted task of this type
+      const nextTask = tasks.value.find(t =>
+        t.task_type === task.task_type && !t.completed_at && !t.skipped_at
+      )
+
+      let nextDue = null
+      let isOverdue = false
+      if (nextTask) {
+        const dueDate = new Date(nextTask.due_date + 'T00:00:00')
+        const diffDays = Math.round((dueDate - today) / (1000 * 60 * 60 * 24))
+        isOverdue = diffDays < 0
+
+        if (diffDays === 0) nextDue = 'Today'
+        else if (diffDays === 1) nextDue = 'Tomorrow'
+        else if (diffDays < 0) nextDue = `${Math.abs(diffDays)}d overdue`
+        else if (diffDays <= 7) nextDue = `In ${diffDays}d`
+        else nextDue = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      }
+
+      schedules[task.task_type] = {
+        label: taskLabels[task.task_type] || task.task_type,
+        interval: recurrence?.interval || '?',
+        type: recurrence?.type || 'days',
+        nextDue,
+        isOverdue
       }
     } catch (e) {
       console.error('Failed to parse recurrence:', e)
@@ -273,12 +297,26 @@ async function updateHealthStatus(status) {
   }
 }
 
+async function rebuildCarePlan() {
+  rebuildingPlan.value = true
+  try {
+    await api.post(`/plants/${route.params.id}/care-plan/regenerate`)
+    window.$toast?.success('Care plan rebuilt!')
+    await refreshPlant()
+  } catch (e) {
+    window.$toast?.error(e.message || 'Failed to rebuild care plan')
+  } finally {
+    rebuildingPlan.value = false
+  }
+}
+
 // Loading overlay state
-const isProcessing = computed(() => uploadingPhoto.value || updatingHealth.value || archiving.value)
+const isProcessing = computed(() => uploadingPhoto.value || updatingHealth.value || archiving.value || rebuildingPlan.value)
 const loadingMessage = computed(() => {
   if (uploadingPhoto.value) return 'Uploading photo...'
   if (updatingHealth.value) return 'Updating health status...'
   if (archiving.value) return 'Archiving plant...'
+  if (rebuildingPlan.value) return 'Rebuilding care plan with AI...'
   return 'Loading...'
 })
 
@@ -579,22 +617,45 @@ function shareToWhatsApp() {
 
       <!-- Care Plan Schedule (hide for archived) -->
       <div v-if="!isArchived" class="mb-6">
-        <h2 class="font-semibold text-gray-900 mb-3">Care Schedule</h2>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold text-gray-900">Care Schedule</h2>
+          <button
+            @click="rebuildCarePlan"
+            :disabled="rebuildingPlan"
+            class="text-sm text-sage-600 font-medium flex items-center gap-1 hover:text-sage-700"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Rebuild Plan
+          </button>
+        </div>
 
-        <!-- Schedule Summary -->
-        <div v-if="careScheduleSummary.length > 0" class="flex flex-wrap gap-2 mb-3">
-          <span
+        <!-- Schedule Summary with next due dates -->
+        <div v-if="careScheduleSummary.length > 0" class="space-y-2 mb-3">
+          <div
             v-for="schedule in careScheduleSummary"
             :key="schedule.label"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-plant-50 text-plant-700 rounded-full text-sm border border-plant-100"
+            class="flex items-center justify-between px-3 py-2 bg-plant-50 rounded-xl border border-plant-100"
           >
-            <span class="font-medium">{{ schedule.label }}</span>
-            <span class="text-plant-500">every {{ schedule.interval }} {{ schedule.type }}</span>
-          </span>
+            <div class="flex items-center gap-2">
+              <span class="font-medium text-plant-700">{{ schedule.label }}</span>
+              <span class="text-plant-500 text-sm">every {{ schedule.interval }} {{ schedule.type }}</span>
+            </div>
+            <span v-if="schedule.nextDue" class="text-xs px-2 py-1 rounded-full" :class="schedule.isOverdue ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'">
+              {{ schedule.nextDue }}
+            </span>
+          </div>
+        </div>
+
+        <!-- No schedule warning -->
+        <div v-else-if="tasks.length === 0" class="bg-amber-50 rounded-xl p-3 mb-3 border border-amber-200">
+          <p class="text-sm text-amber-700">No care schedule set. This may happen if the plant was just added or the care plan needs to be regenerated.</p>
         </div>
 
         <!-- AI Reasoning (if available) -->
         <div v-if="carePlan?.ai_reasoning" class="bg-cream-50 rounded-xl p-3 mb-3 border border-cream-200">
+          <p class="text-xs font-medium text-charcoal-500 mb-1">AI Care Plan Reasoning:</p>
           <p class="text-sm text-charcoal-600">{{ carePlan.ai_reasoning }}</p>
         </div>
 

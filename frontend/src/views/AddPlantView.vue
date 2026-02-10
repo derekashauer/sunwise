@@ -55,7 +55,8 @@ const form = ref({
   has_grow_light: false,
   grow_light_hours: null,
   has_drainage: true,
-  baseline_light_reading: null
+  baseline_light_reading: null,
+  can_rotate: true
 })
 
 const imageFile = ref(null)
@@ -131,7 +132,8 @@ onMounted(async () => {
         has_grow_light: !!plant.has_grow_light,
         grow_light_hours: plant.grow_light_hours || null,
         has_drainage: plant.has_drainage !== 0,
-        baseline_light_reading: plant.baseline_light_reading || null
+        baseline_light_reading: plant.baseline_light_reading || null,
+        can_rotate: plant.can_rotate !== 0
       }
       if (plant.thumbnail) {
         imagePreview.value = `/uploads/plants/${plant.thumbnail}`
@@ -570,6 +572,25 @@ function skipCarePlanUpdate() {
         </label>
         <img
           src="https://img.icons8.com/doodle/48/potted-plant.png"
+          alt=""
+          class="w-6 h-6 opacity-50"
+        >
+      </div>
+
+      <!-- Can Rotate (hide for propagations) -->
+      <div v-if="!form.is_propagation" class="flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200">
+        <input
+          type="checkbox"
+          id="can-rotate"
+          v-model="form.can_rotate"
+          class="w-5 h-5 rounded border-gray-300 text-plant-600 focus:ring-plant-500"
+        >
+        <label for="can-rotate" class="flex-1 cursor-pointer">
+          <span class="text-sm font-medium text-gray-700">Needs rotation for even growth</span>
+          <span class="text-xs text-gray-500 block">Uncheck for hanging plants or symmetrical plants</span>
+        </label>
+        <img
+          src="https://img.icons8.com/doodle/48/rotate.png"
           alt=""
           class="w-6 h-6 opacity-50"
         >
