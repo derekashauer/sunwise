@@ -551,7 +551,7 @@ INST;
 
         $data = [
             'model' => $this->model,
-            'max_tokens' => $maxTokens,
+            'max_completion_tokens' => $maxTokens,
             'messages' => $messages
         ];
 

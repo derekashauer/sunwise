@@ -48,6 +48,20 @@ class PlantController
     }
 
     /**
+     * Normalize plant data types for consistent JSON output
+     */
+    private function normalizePlant(array $plant): array
+    {
+        $intFields = ['is_propagation', 'has_grow_light', 'species_confirmed', 'has_drainage', 'can_rotate'];
+        foreach ($intFields as $field) {
+            if (array_key_exists($field, $plant)) {
+                $plant[$field] = (int)$plant[$field];
+            }
+        }
+        return $plant;
+    }
+
+    /**
      * List all active plants for user (excludes archived)
      * Includes both owned plants and plants shared via household
      */
@@ -69,7 +83,7 @@ class PlantController
             WHERE {$accessCondition} AND p.archived_at IS NULL
             ORDER BY p.created_at DESC
         ");
-        $plants = $stmt->fetchAll();
+        $plants = array_map([$this, 'normalizePlant'], $stmt->fetchAll());
 
         return ['plants' => $plants];
     }
@@ -296,7 +310,7 @@ class PlantController
         // Get the created plant
         $stmt = db()->prepare('SELECT * FROM plants WHERE id = ?');
         $stmt->execute([$plantId]);
-        $plant = $stmt->fetch();
+        $plant = $this->normalizePlant($stmt->fetch());
         $plant['thumbnail'] = $imageFilename;
 
         return ['plant' => $plant];
@@ -320,7 +334,7 @@ class PlantController
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as thumbnail,
                    CASE WHEN p.user_id = ? THEN 1 ELSE 0 END as is_owned,
                    CASE WHEN p.user_id != ? THEN
-                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, \'@\') - 1))
+                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1))
                         FROM users u WHERE u.id = p.user_id)
                    ELSE NULL END as owner_name
             FROM plants p
@@ -333,6 +347,8 @@ class PlantController
         if (!$plant) {
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
         }
+
+        $plant = $this->normalizePlant($plant);
 
         // Add Wikipedia link for species
         if ($plant['species']) {
@@ -379,7 +395,7 @@ class PlantController
         $stmt = db()->prepare('SELECT * FROM plants WHERE id = ?');
         $stmt->execute([$plantId]);
 
-        return ['plant' => $stmt->fetch()];
+        return ['plant' => $this->normalizePlant($stmt->fetch())];
     }
 
     /**

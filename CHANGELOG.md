@@ -2,6 +2,17 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.13.1] - 2026-02-10
+
+### Fixed
+- **Water propagation detection** - Fixed check tasks incorrectly showing "water propagation" for normal potted plants by using explicit integer comparison instead of truthy check
+- **Plant data type normalization** - Backend now casts `is_propagation`, `has_grow_light`, and other integer fields to proper types before JSON encoding
+- **Task query SQL error** - Fixed escaped quote syntax (`\'@\'`) in task queries that caused "unrecognized token" errors and prevented tasks from loading
+- **OpenAI API compatibility** - Updated to use `max_completion_tokens` instead of deprecated `max_tokens` parameter for GPT-5.2, fixing species identification and care plan generation
+- **Propagation task validation** - Care plan generator now blocks invalid task types for propagations (no "water" tasks for water propagations, no "change_water" for soil propagations)
+- **Form validation conflict** - Added `novalidate` to plant form to prevent browser native validation from blocking submissions
+- **Care plan evaluator improvements** - Now also detects plants with no care plan at all and plans missing check tasks
+
 ## [0.13.0] - 2026-02-08
 
 ### Added

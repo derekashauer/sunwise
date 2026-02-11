@@ -83,12 +83,12 @@ class TaskController
                    p.location as plant_location,
                    p.species as plant_species,
                    p.light_condition as plant_light_condition,
-                   p.is_propagation as plant_is_propagation,
+                   CAST(COALESCE(p.is_propagation, 0) AS INTEGER) as plant_is_propagation,
                    p.soil_type as plant_soil_type,
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail,
                    CASE WHEN p.user_id = {$userId} THEN 1 ELSE 0 END as is_owned,
                    CASE WHEN t.completed_by_user_id IS NOT NULL THEN
-                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, \'@\') - 1))
+                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1))
                         FROM users u WHERE u.id = t.completed_by_user_id)
                    ELSE NULL END as completed_by_name
             FROM tasks t

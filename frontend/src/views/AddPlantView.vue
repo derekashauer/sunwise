@@ -365,7 +365,7 @@ function skipCarePlanUpdate() {
       <h1 class="page-title mb-0">{{ isEditing ? 'Edit Plant' : 'Add Plant' }}</h1>
     </header>
 
-    <form @submit.prevent="handleSubmit" class="space-y-6">
+    <form @submit.prevent="handleSubmit" novalidate class="space-y-6">
       <div v-if="error" class="p-3 bg-terracotta-50 text-terracotta-700 text-sm rounded-xl border border-terracotta-200">
         {{ error }}
       </div>

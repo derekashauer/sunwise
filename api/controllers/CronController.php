@@ -330,12 +330,16 @@ class CronController
             $currentSeason = 'winter';
         }
 
+        // Evaluate plants WITH active care plans
         $stmt = db()->query("
             SELECT cp.id as care_plan_id, cp.plant_id, cp.season, cp.valid_until, cp.generated_at,
                    p.user_id, p.name as plant_name,
                    (SELECT COUNT(*) FROM tasks t
                     WHERE t.care_plan_id = cp.id AND t.completed_at IS NULL AND t.skipped_at IS NULL
-                   ) as pending_task_count
+                   ) as pending_task_count,
+                   (SELECT COUNT(*) FROM tasks t
+                    WHERE t.care_plan_id = cp.id AND t.task_type = 'check' AND t.completed_at IS NULL AND t.skipped_at IS NULL
+                   ) as pending_check_count
             FROM care_plans cp
             JOIN plants p ON cp.plant_id = p.id
             WHERE cp.is_active = 1
@@ -343,7 +347,27 @@ class CronController
         ");
         $plans = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+        // Also find plants with NO care plan at all
+        $stmt2 = db()->query("
+            SELECT p.id as plant_id, p.user_id, p.name as plant_name
+            FROM plants p
+            WHERE p.archived_at IS NULL
+              AND NOT EXISTS (SELECT 1 FROM care_plans cp WHERE cp.plant_id = p.id AND cp.is_active = 1)
+        ");
+        $planlessPlants = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+
         $carePlanController = new CarePlanController();
+
+        // Generate plans for plants that have none
+        foreach ($planlessPlants as $plant) {
+            try {
+                $carePlanController->generateCarePlan($plant['plant_id'], $plant['user_id']);
+                $regenerated++;
+                error_log("Cron: Generated care plan for plant {$plant['plant_name']} (ID: {$plant['plant_id']}). Reason: No care plan existed");
+            } catch (Exception $e) {
+                $errors[] = "Failed to generate plan for plant {$plant['plant_id']}: " . $e->getMessage();
+            }
+        }
 
         foreach ($plans as $plan) {
             $shouldRegenerate = false;
@@ -376,6 +400,12 @@ class CronController
                 $reason = "Season changed from {$plan['season']} to {$currentSeason}";
             }
 
+            // 5. Plan is missing check tasks
+            if (!$shouldRegenerate && (int)$plan['pending_check_count'] === 0) {
+                $shouldRegenerate = true;
+                $reason = 'No pending check tasks';
+            }
+
             if ($shouldRegenerate) {
                 try {
                     $carePlanController->generateCarePlan($plan['plant_id'], $plan['user_id']);
@@ -395,6 +425,7 @@ class CronController
             'success' => true,
             'date' => $today,
             'season' => $currentSeason,
+            'plants_without_plan' => count($planlessPlants),
             'plans_evaluated' => count($plans),
             'plans_regenerated' => $regenerated,
             'skipped' => $skipped,

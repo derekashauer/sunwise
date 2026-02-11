@@ -245,6 +245,18 @@ class CarePlanController
                     continue;
                 }
 
+                // Propagation task validation
+                if (!empty($plant['is_propagation'])) {
+                    // Water propagations: no water, fertilize, or rotate tasks
+                    if ($plant['soil_type'] === 'water' && in_array($task['type'], ['water', 'fertilize', 'rotate'])) {
+                        continue;
+                    }
+                    // Rooting medium propagations: no change_water tasks
+                    if ($plant['soil_type'] !== 'water' && $task['type'] === 'change_water') {
+                        continue;
+                    }
+                }
+
                 $stmt = db()->prepare('
                     INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, instructions, priority)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
