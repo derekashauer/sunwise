@@ -334,7 +334,7 @@ class PlantController
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as thumbnail,
                    CASE WHEN p.user_id = ? THEN 1 ELSE 0 END as is_owned,
                    CASE WHEN p.user_id != ? THEN
-                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1))
+                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, \'@\') - 1))
                         FROM users u WHERE u.id = p.user_id)
                    ELSE NULL END as owner_name
             FROM plants p

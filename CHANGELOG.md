@@ -2,6 +2,14 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.13.2] - 2026-03-10
+
+### Fixed
+- **Back-to-back task scheduling** - Fixed recurring tasks (especially watering) being scheduled too soon when completed late. Next occurrence now uses `max(due_date + interval, today + interval)` to ensure proper spacing
+- **Wet check auto-skips watering** - When a check task reports soil moisture >= 7/10, any pending water task for that plant is automatically skipped with a notification. Very wet soil (>= 9) with upcoming watering also triggers care plan regeneration
+- **Public gallery showing archived plants** - Gallery page no longer includes plants that have been moved to the graveyard
+- **Archived plant task cleanup** - Pending tasks for archived plants are now properly cleaned up
+
 ## [0.13.1] - 2026-02-10
 
 ### Fixed

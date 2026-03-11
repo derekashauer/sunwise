@@ -376,26 +376,54 @@ class TaskController
             }
         }
 
-        // Very wet soil (moisture >= 9) and watering soon - may need less frequent watering
-        if ($moisture !== null && $moisture >= 9) {
+        // Wet soil (moisture >= 7) - auto-skip today's water task if one exists
+        if ($moisture !== null && $moisture >= 7) {
+            $today = date('Y-m-d');
             $stmt = db()->prepare('
-                SELECT due_date FROM tasks
-                WHERE plant_id = ? AND task_type = "water" AND completed_at IS NULL AND skipped_at IS NULL
-                ORDER BY due_date ASC LIMIT 1
+                SELECT id, recurrence FROM tasks
+                WHERE plant_id = ? AND task_type = "water"
+                  AND due_date <= ? AND completed_at IS NULL AND skipped_at IS NULL
+                LIMIT 1
             ');
-            $stmt->execute([$plantId]);
-            $nextWater = $stmt->fetch();
+            $stmt->execute([$plantId, $today]);
+            $todayWater = $stmt->fetch();
 
-            if ($nextWater) {
-                $daysUntilWater = (strtotime($nextWater['due_date']) - strtotime('today')) / 86400;
-                // If soil is soaking wet and watering is within 2 days, update plan
-                if ($daysUntilWater <= 2) {
-                    $shouldUpdatePlan = true;
-                    $insights[] = [
-                        'type' => 'warning',
-                        'message' => 'Soil is very wet and watering is scheduled soon. Regenerating care plan to reduce watering frequency.',
-                        'suggestion' => ['action' => 'adjust_watering', 'details' => 'Care plan will be updated with less frequent watering']
-                    ];
+            if ($todayWater) {
+                // Auto-skip the water task
+                $stmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
+                $stmt->execute(['Auto-skipped: check reported high moisture (' . $moisture . '/10)', $todayWater['id']]);
+
+                // Generate next occurrence so the schedule continues
+                if ($todayWater['recurrence']) {
+                    $this->generateNextOccurrence($todayWater);
+                }
+
+                $insights[] = [
+                    'type' => 'info',
+                    'message' => 'Soil moisture is high (' . $moisture . '/10). Today\'s watering task has been automatically skipped.'
+                ];
+            }
+
+            // Very wet (>= 9) and next watering is soon - consider plan update
+            if ($moisture >= 9) {
+                $stmt = db()->prepare('
+                    SELECT due_date FROM tasks
+                    WHERE plant_id = ? AND task_type = "water" AND completed_at IS NULL AND skipped_at IS NULL
+                    ORDER BY due_date ASC LIMIT 1
+                ');
+                $stmt->execute([$plantId]);
+                $nextWater = $stmt->fetch();
+
+                if ($nextWater) {
+                    $daysUntilWater = (strtotime($nextWater['due_date']) - strtotime('today')) / 86400;
+                    if ($daysUntilWater <= 2) {
+                        $shouldUpdatePlan = true;
+                        $insights[] = [
+                            'type' => 'warning',
+                            'message' => 'Soil is very wet and watering is scheduled soon. Regenerating care plan to reduce watering frequency.',
+                            'suggestion' => ['action' => 'adjust_watering', 'details' => 'Care plan will be updated with less frequent watering']
+                        ];
+                    }
                 }
             }
         }
@@ -1437,7 +1465,13 @@ Consider:
         $interval = $recurrence['interval'] ?? 7;
         $type = $recurrence['type'] ?? 'days';
 
-        $nextDate = date('Y-m-d', strtotime($task['due_date'] . " +$interval $type"));
+        // Calculate next date from the original due_date
+        $fromDueDate = strtotime($task['due_date'] . " +$interval $type");
+        // But ensure it's at least $interval days from today (prevents back-to-back
+        // tasks when a task is completed late — e.g. 3-day watering completed 2 days
+        // late would otherwise schedule next occurrence for tomorrow)
+        $fromToday = strtotime("today +$interval $type");
+        $nextDate = date('Y-m-d', max($fromDueDate, $fromToday));
 
         // Check if a similar pending task already exists to prevent duplicates
         $stmt = db()->prepare('

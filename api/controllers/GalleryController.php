@@ -38,7 +38,7 @@ class GalleryController
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as thumbnail
             FROM plants p
             LEFT JOIN locations l ON p.location_id = l.id
-            WHERE p.user_id = ?
+            WHERE p.user_id = ? AND p.archived_at IS NULL
             ORDER BY p.name ASC
         ');
         $stmt->execute([$user['id']]);
