@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { useApi } from '@/composables/useApi'
@@ -61,6 +61,14 @@ const taskIcons = {
   check_roots: { src: 'https://img.icons8.com/doodle/48/soil.png', alt: 'check roots' },
   pot_up: { src: 'https://img.icons8.com/doodle/48/potted-plant.png', alt: 'pot up' }
 }
+
+const daysUntilDue = computed(() => {
+  if (!props.task.pulled_forward) return 0
+  const due = new Date(props.task.due_date + 'T00:00:00')
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+  return Math.max(1, Math.ceil((due - now) / 86400000))
+})
 
 function getTaskIcon(taskType) {
   return taskIcons[taskType] || { src: 'https://img.icons8.com/doodle/48/todo-list.png', alt: 'task' }
@@ -288,6 +296,12 @@ async function applyScheduleAdjustment() {
             :class="task.priority === 'urgent' ? 'bg-terracotta-100 text-terracotta-700' : 'bg-sunny-100 text-sunny-700'"
           >
             {{ task.priority }}
+          </span>
+          <span
+            v-if="task.pulled_forward"
+            class="px-1.5 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700"
+          >
+            Batched · due in {{ daysUntilDue }} days
           </span>
         </div>
         <div class="flex items-center gap-1">
