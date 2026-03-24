@@ -181,6 +181,23 @@ class CarePlanController
         $stmt = db()->prepare('UPDATE care_plans SET is_active = 0 WHERE plant_id = ?');
         $stmt->execute([$plantId]);
 
+        // Remember most recent completion date per task type (to avoid scheduling too soon)
+        $stmt = db()->prepare('
+            SELECT task_type, MAX(completed_at) as last_completed,
+                   json_extract(recurrence, "$.interval") as last_interval
+            FROM tasks
+            WHERE plant_id = ? AND completed_at IS NOT NULL
+            GROUP BY task_type
+        ');
+        $stmt->execute([$plantId]);
+        $recentCompletions = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $recentCompletions[$row['task_type']] = [
+                'date' => substr($row['last_completed'], 0, 10),
+                'interval' => (int)($row['last_interval'] ?? 7)
+            ];
+        }
+
         // Delete pending tasks from old care plans (keep completed/skipped for history)
         $stmt = db()->prepare('
             DELETE FROM tasks
@@ -245,6 +262,11 @@ class CarePlanController
                     continue;
                 }
 
+                // Enforce minimum check interval of 7 days
+                if ($task['type'] === 'check' && isset($task['recurrence']['interval']) && $task['recurrence']['interval'] < 7) {
+                    $task['recurrence']['interval'] = 7;
+                }
+
                 // Propagation task validation
                 if (!empty($plant['is_propagation'])) {
                     // Water propagations: no water, fertilize, or rotate tasks
@@ -257,6 +279,19 @@ class CarePlanController
                     }
                 }
 
+                // Adjust due date if this task type was recently completed
+                $dueDate = $task['due_date'];
+                if (isset($recentCompletions[$task['type']])) {
+                    $lastDone = $recentCompletions[$task['type']]['date'];
+                    $interval = isset($task['recurrence']['interval']) ? $task['recurrence']['interval'] : ($recentCompletions[$task['type']]['interval'] ?? 7);
+                    $earliestNext = date('Y-m-d', strtotime("$lastDone +$interval days"));
+                    $today = date('Y-m-d');
+                    // Don't schedule before the interval has elapsed since last completion
+                    if ($dueDate < $earliestNext) {
+                        $dueDate = max($earliestNext, $today);
+                    }
+                }
+
                 $stmt = db()->prepare('
                     INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, instructions, priority)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -265,7 +300,7 @@ class CarePlanController
                     $carePlanId,
                     $plantId,
                     $task['type'],
-                    $task['due_date'],
+                    $dueDate,
                     isset($task['recurrence']) ? json_encode($task['recurrence']) : null,
                     $task['instructions'] ?? null,
                     $task['priority'] ?? 'normal'

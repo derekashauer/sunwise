@@ -130,16 +130,26 @@ function cancelNotes() {
 async function handleCheckComplete(checkData) {
   if (loading.value || props.completed) return
   loading.value = true
+
+  // Close modal immediately so user can continue with other tasks
+  showCheckModal.value = false
+  emit('completed', props.task)
+  window.$toast?.success('Check completed!')
+
+  // Run the API call in the background (includes AI analysis & care plan updates)
   try {
     const result = await tasks.completeCheckTask(props.task.id, checkData)
-    window.$toast?.success('Check completed!')
 
-    // If there are insights, pass them to the modal to display
+    // Show insights as toast notifications if any came back
     if (result.insights && result.insights.length > 0) {
-      checkInsights.value = result.insights
-    } else {
-      showCheckModal.value = false
-      emit('completed', props.task)
+      for (const insight of result.insights) {
+        const plantName = props.task.plant_name || 'Plant'
+        if (insight.type === 'warning') {
+          window.$toast?.error(`${plantName}: ${insight.message}`, { duration: 8000 })
+        } else {
+          window.$toast?.success(`${plantName}: ${insight.message}`, { duration: 6000 })
+        }
+      }
     }
   } catch (error) {
     window.$toast?.error(error.message)
@@ -259,12 +269,12 @@ async function applyScheduleAdjustment() {
       <button
         v-if="plant?.thumbnail || task.plant_thumbnail"
         @click="showImageModal = true"
-        class="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 border-2 border-sage-200 hover:border-sage-400 transition-colors cursor-pointer"
+        class="w-24 h-24 rounded-xl overflow-hidden flex-shrink-0 border-2 border-sage-200 hover:border-sage-400 transition-colors cursor-pointer"
       >
         <img :src="`/uploads/plants/${plant?.thumbnail || task.plant_thumbnail}`" :alt="plant?.name || task.plant_name" class="w-full h-full object-cover">
       </button>
-      <div v-else class="w-12 h-12 rounded-xl bg-cream-200 flex items-center justify-center flex-shrink-0">
-        <img :src="getTaskIcon(task.task_type).src" :alt="getTaskIcon(task.task_type).alt" class="w-6 h-6">
+      <div v-else class="w-24 h-24 rounded-xl bg-cream-200 flex items-center justify-center flex-shrink-0">
+        <img :src="getTaskIcon(task.task_type).src" :alt="getTaskIcon(task.task_type).alt" class="w-10 h-10">
       </div>
 
       <!-- Task info -->

@@ -393,9 +393,9 @@ class TaskController
                 $stmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
                 $stmt->execute(['Auto-skipped: check reported high moisture (' . $moisture . '/10)', $todayWater['id']]);
 
-                // Generate next occurrence so the schedule continues
+                // Generate next occurrence so the schedule continues (use skip mode for shorter delay)
                 if ($todayWater['recurrence']) {
-                    $this->generateNextOccurrence($todayWater);
+                    $this->generateNextOccurrence($todayWater, 'skip');
                 }
 
                 $insights[] = [
@@ -727,9 +727,9 @@ class TaskController
             $userId
         ]);
 
-        // Generate next occurrence if recurring
+        // Generate next occurrence if recurring, using skip-specific delays
         if ($task['recurrence']) {
-            $this->generateNextOccurrence($task);
+            $this->generateNextOccurrence($task, 'skip');
         }
 
         return ['task' => $task];
@@ -1456,8 +1456,9 @@ Consider:
 
     /**
      * Generate next occurrence of recurring task
+     * @param string $mode 'complete' or 'skip' — skip uses shorter type-based delays
      */
-    private function generateNextOccurrence(array $task): void
+    private function generateNextOccurrence(array $task, string $mode = 'complete'): void
     {
         $recurrence = json_decode($task['recurrence'], true);
         if (!$recurrence) return;
@@ -1465,13 +1466,33 @@ Consider:
         $interval = $recurrence['interval'] ?? 7;
         $type = $recurrence['type'] ?? 'days';
 
-        // Calculate next date from the original due_date
-        $fromDueDate = strtotime($task['due_date'] . " +$interval $type");
-        // But ensure it's at least $interval days from today (prevents back-to-back
-        // tasks when a task is completed late — e.g. 3-day watering completed 2 days
-        // late would otherwise schedule next occurrence for tomorrow)
-        $fromToday = strtotime("today +$interval $type");
-        $nextDate = date('Y-m-d', max($fromDueDate, $fromToday));
+        if ($mode === 'skip') {
+            // When skipping, use type-specific delays (shorter than full interval)
+            $skipDelays = [
+                'water' => 1,        // Next day — plant still needs water
+                'mist' => 1,         // Next day — humidity-sensitive
+                'change_water' => 2, // 2 days — propagation water freshness
+                'check' => 3,        // 3 days — routine monitoring
+                'fertilize' => 7,    // 1 week — not time-critical
+                'rotate' => 7,       // 1 week — gradual process
+                'trim' => 7,         // 1 week — can wait
+                'prune' => 7,        // 1 week — can wait
+                'repot' => 14,       // 2 weeks — major task
+                'pot_up' => 14,      // 2 weeks — major task
+                'check_roots' => 14, // 2 weeks — infrequent
+            ];
+            $skipDays = $skipDelays[$task['task_type']] ?? 3;
+            // Use the shorter of skip delay or full interval
+            $effectiveDelay = min($skipDays, $interval);
+            $nextDate = date('Y-m-d', strtotime("today +$effectiveDelay days"));
+        } else {
+            // When completing, space by full interval from whichever is later
+            $fromDueDate = strtotime($task['due_date'] . " +$interval $type");
+            // Ensure at least $interval days from today (prevents back-to-back
+            // tasks when completed late)
+            $fromToday = strtotime("today +$interval $type");
+            $nextDate = date('Y-m-d', max($fromDueDate, $fromToday));
+        }
 
         // Check if a similar pending task already exists to prevent duplicates
         $stmt = db()->prepare('

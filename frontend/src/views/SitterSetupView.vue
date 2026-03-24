@@ -14,6 +14,20 @@ const sitterName = ref('')
 const instructions = ref('')
 const generatedLink = ref('')
 
+const allTaskTypes = [
+  { value: 'water', label: 'Water' },
+  { value: 'mist', label: 'Mist' },
+  { value: 'change_water', label: 'Change Water' },
+  { value: 'fertilize', label: 'Fertilize' },
+  { value: 'rotate', label: 'Rotate' },
+  { value: 'check', label: 'Check' },
+  { value: 'trim', label: 'Trim' },
+  { value: 'repot', label: 'Repot' },
+  { value: 'pot_up', label: 'Pot Up' },
+  { value: 'check_roots', label: 'Check Roots' }
+]
+const selectedTaskTypes = ref(['water', 'mist', 'change_water', 'fertilize', 'rotate'])
+
 onMounted(() => {
   plants.fetchPlants()
 
@@ -45,6 +59,15 @@ function togglePlant(id) {
   }
 }
 
+function toggleTaskType(type) {
+  const index = selectedTaskTypes.value.indexOf(type)
+  if (index === -1) {
+    selectedTaskTypes.value.push(type)
+  } else {
+    selectedTaskTypes.value.splice(index, 1)
+  }
+}
+
 async function createSitterLink() {
   if (selectedPlants.value.length === 0) {
     window.$toast?.error('Please select at least one plant')
@@ -55,6 +78,7 @@ async function createSitterLink() {
   try {
     const response = await api.post('/sitter/create', {
       plant_ids: selectedPlants.value,
+      task_types: selectedTaskTypes.value,
       start_date: startDate.value,
       end_date: endDate.value,
       sitter_name: sitterName.value,
@@ -190,6 +214,25 @@ async function shareLink() {
               <p class="font-medium text-gray-900">{{ plant.name }}</p>
               <p v-if="plant.location" class="text-xs text-gray-500">{{ plant.location }}</p>
             </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Task types -->
+      <div class="card p-4">
+        <h2 class="font-semibold text-gray-900 mb-3">Task Types to Include</h2>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="type in allTaskTypes"
+            :key="type.value"
+            type="button"
+            @click="toggleTaskType(type.value)"
+            class="px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+            :class="selectedTaskTypes.includes(type.value)
+              ? 'bg-plant-500 text-white'
+              : 'bg-gray-100 text-gray-500 hover:bg-gray-200'"
+          >
+            {{ type.label }}
           </button>
         </div>
       </div>

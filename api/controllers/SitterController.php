@@ -11,6 +11,7 @@ class SitterController
     public function create(array $params, array $body, ?int $userId): array
     {
         $plantIds = $body['plant_ids'] ?? [];
+        $taskTypes = $body['task_types'] ?? [];
         $startDate = $body['start_date'] ?? null;
         $endDate = $body['end_date'] ?? null;
         $sitterName = $body['sitter_name'] ?? null;
@@ -38,11 +39,12 @@ class SitterController
         $token = bin2hex(random_bytes(32));
 
         // Create session
+        $taskTypesJson = !empty($taskTypes) ? json_encode($taskTypes) : null;
         $stmt = db()->prepare('
-            INSERT INTO sitter_sessions (user_id, token, start_date, end_date, sitter_name, instructions)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO sitter_sessions (user_id, token, start_date, end_date, sitter_name, instructions, task_types)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         ');
-        $stmt->execute([$userId, $token, $startDate, $endDate, $sitterName, $instructions]);
+        $stmt->execute([$userId, $token, $startDate, $endDate, $sitterName, $instructions, $taskTypesJson]);
         $sessionId = db()->lastInsertId();
 
         // Add plants to session
@@ -95,8 +97,16 @@ class SitterController
         $stmt->execute([$session['id']]);
         $plants = $stmt->fetchAll();
 
-        // Get tasks for session date range
-        $stmt = db()->prepare('
+        // Get tasks for session date range, filtered by allowed task types
+        $taskTypes = $session['task_types'] ? json_decode($session['task_types'], true) : null;
+        $taskTypeFilter = '';
+        $taskParams = [$session['id'], $session['start_date'], $session['end_date']];
+        if ($taskTypes && is_array($taskTypes)) {
+            $placeholders = implode(',', array_fill(0, count($taskTypes), '?'));
+            $taskTypeFilter = "AND t.task_type IN ($placeholders)";
+            $taskParams = array_merge($taskParams, $taskTypes);
+        }
+        $stmt = db()->prepare("
             SELECT t.id, t.task_type, t.due_date, t.instructions, t.priority, t.completed_at,
                    p.name as plant_name, p.location as plant_location,
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail
@@ -106,9 +116,10 @@ class SitterController
             WHERE sp.session_id = ?
               AND t.due_date BETWEEN ? AND ?
               AND t.skipped_at IS NULL
+              $taskTypeFilter
             ORDER BY t.due_date ASC, t.priority ASC
-        ');
-        $stmt->execute([$session['id'], $session['start_date'], $session['end_date']]);
+        ");
+        $stmt->execute($taskParams);
         $tasks = $stmt->fetchAll();
 
         return [

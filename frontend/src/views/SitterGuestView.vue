@@ -150,7 +150,7 @@ const taskIcons = {
                 </p>
               </div>
 
-              <div v-if="task.plant_thumbnail" class="w-14 h-14 rounded-lg overflow-hidden flex-shrink-0">
+              <div v-if="task.plant_thumbnail" class="w-24 h-24 rounded-lg overflow-hidden flex-shrink-0">
                 <img :src="`/uploads/plants/${task.plant_thumbnail}`" class="w-full h-full object-cover">
               </div>
             </div>

@@ -2,6 +2,21 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.13.3] - 2026-03-23
+
+### Added
+- **Sitter task type selection** - Choose which task types (water, mist, rotate, etc.) to include when creating a sitter link
+- **Larger plant photos in task list** - Plant thumbnails doubled in size (96x96) in both main task list and sitter view
+
+### Changed
+- **Background check analysis** - Check task modal closes immediately; AI analysis and care plan updates run in the background with results shown as toast notifications
+- **Differentiated skip rescheduling** - Skipped tasks reschedule based on urgency: water/mist next day, check 3 days, fertilize/rotate/trim 1 week, repot 2 weeks
+
+### Fixed
+- **Check task duplication** - Care plan regeneration no longer creates duplicate check tasks; respects recently completed task dates when scheduling
+- **7-day minimum check interval** - AI can no longer set check task intervals shorter than 7 days, preventing excessive daily checking
+- **Check task redistribution** - Evenly spread check tasks across the week instead of clustering on specific days
+
 ## [0.13.2] - 2026-03-10
 
 ### Fixed
