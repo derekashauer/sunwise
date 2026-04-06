@@ -2,14 +2,19 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.14.1] - 2026-04-06
+
+### Fixed
+- **Fertilize batching no longer pulls forward** - Fertilize tasks only appear when naturally due (at or past their scheduled date), never pulled forward from the future. Batch threshold reduced to 3 tasks
+- **Daily task reconciliation** - When loading today's tasks, water/fertilize tasks are checked against actual care history. If a plant was recently watered or fertilized within its interval, the task is automatically pushed out to the correct future date
+- **Water/fertilize are bidirectionally linked** - Completing either task auto-skips and reschedules the other, since fertilizer is mixed with water. Same-day water+fertilize conflicts are resolved automatically
+- **Duplicate task prevention strengthened** - `generateNextOccurrence` now checks for any pending task of the same type per plant, not just same-date duplicates
+
 ## [0.14.0] - 2026-03-23
 
 ### Added
-- **Fertilize batching** - Fertilize tasks are automatically grouped into batches of 5+ plants so you can mix one bucket of fertilizer water and use it across many plants at once
-  - Tasks within a 10-day lookahead window are pulled forward when the batch threshold is reached
-  - Pulled-forward tasks show a "Batched · due in X days" badge
-  - Fertilize tasks stay hidden from the Today view until enough accumulate for a worthwhile batch
-- **Fertilize auto-skips watering** - When a plant is fertilized, its water task for that day is automatically skipped since fertilizer is mixed with water. Next watering rescheduled normally
+- **Fertilize batching** - Fertilize tasks are grouped when 3+ are naturally due at the same time
+- **Fertilize auto-skips watering** - When a plant is fertilized, its water task is automatically skipped since fertilizer is mixed with water. Next watering rescheduled normally
 
 ## [0.13.3] - 2026-03-23
 

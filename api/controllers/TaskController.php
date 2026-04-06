@@ -77,6 +77,10 @@ class TaskController
         $accessCondition = $this->getAccessiblePlantCondition($userId);
         $taskTypeCondition = $this->getDisabledTaskTypeCondition($userId);
 
+        // Daily reconciliation: if a plant has a pending water/fertilize task AND was
+        // recently watered/fertilized (via care_log), skip the task if it's too soon
+        $this->reconcileOverdueTasks($userId, $accessCondition);
+
         $stmt = db()->query("
             SELECT t.*,
                    p.name as plant_name,
@@ -112,77 +116,24 @@ class TaskController
 
         $tasks = $stmt->fetchAll();
 
-        // Fertilize batching: accumulate nearby fertilize tasks with minimum batch size
+        // Fertilize batching: only show fertilize tasks when enough are naturally due
+        // Never pull forward — only batch what's already due today or overdue
         $pendingFertilize = [];
+        $otherTasks = [];
         foreach ($tasks as $t) {
             if ($t['task_type'] === 'fertilize' && !$t['completed_at']) {
                 $pendingFertilize[] = $t;
+            } else {
+                $otherTasks[] = $t;
             }
         }
 
-        $pullForwardDate = date('Y-m-d', strtotime('+10 days'));
-        $existingIds = array_column($tasks, 'id');
-        $idExclusion = empty($existingIds) ? 't.id > 0' : 't.id NOT IN (' . implode(',', $existingIds) . ')';
-
-        // Check how many fertilize tasks are due in the next 10 days
-        $stmt2 = db()->query("
-            SELECT t.*,
-                   p.name as plant_name,
-                   p.location as plant_location,
-                   p.species as plant_species,
-                   p.light_condition as plant_light_condition,
-                   CAST(COALESCE(p.is_propagation, 0) AS INTEGER) as plant_is_propagation,
-                   p.soil_type as plant_soil_type,
-                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail,
-                   CASE WHEN p.user_id = {$userId} THEN 1 ELSE 0 END as is_owned,
-                   NULL as completed_by_name,
-                   1 as pulled_forward
-            FROM tasks t
-            JOIN plants p ON t.plant_id = p.id
-            WHERE {$accessCondition}
-              AND t.task_type = 'fertilize'
-              AND t.due_date > '{$today}'
-              AND t.due_date <= '{$pullForwardDate}'
-              AND t.completed_at IS NULL
-              AND t.skipped_at IS NULL
-              AND p.archived_at IS NULL
-              AND {$taskTypeCondition}
-              AND {$idExclusion}
-            ORDER BY t.due_date ASC
-        ");
-        $upcomingFertilize = $stmt2->fetchAll();
-
-        $totalBatch = count($pendingFertilize) + count($upcomingFertilize);
-
-        if ($totalBatch >= 5) {
-            // Batch is big enough — include all pulled-forward fertilize tasks
-            $tasks = array_merge($tasks, $upcomingFertilize);
-
-            // Auto-skip water tasks for plants being fertilized (fertilizer is mixed with water)
-            $fertilizePlantIds = array_merge(
-                array_column($pendingFertilize, 'plant_id'),
-                array_column($upcomingFertilize, 'plant_id')
-            );
-            foreach ($tasks as $i => $t) {
-                if ($t['task_type'] === 'water' && !$t['completed_at'] && !$t['skipped_at']
-                    && in_array($t['plant_id'], $fertilizePlantIds)) {
-                    // Auto-skip the water task
-                    $skipStmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
-                    $skipStmt->execute(['Auto-skipped: plant being fertilized (fertilizer mixed with water)', $t['id']]);
-                    // Generate next water occurrence
-                    if ($t['recurrence']) {
-                        $this->generateNextOccurrence($t, 'skip');
-                    }
-                    // Mark as skipped in the response
-                    $tasks[$i]['skipped_at'] = date('Y-m-d H:i:s');
-                    $tasks[$i]['skip_reason'] = 'Auto-skipped: fertilized today';
-                }
-            }
+        if (count($pendingFertilize) >= 3) {
+            // Enough fertilize tasks are naturally due — show them all
+            $tasks = array_merge($otherTasks, $pendingFertilize);
         } else {
-            // Not enough for a batch — hide fertilize tasks from today's list
-            $tasks = array_values(array_filter($tasks, function($t) {
-                return $t['task_type'] !== 'fertilize' || $t['completed_at'] !== null;
-            }));
+            // Not enough for a batch — hide fertilize tasks, they'll accumulate
+            $tasks = $otherTasks;
         }
 
         return ['tasks' => $tasks];
@@ -306,22 +257,48 @@ class TaskController
             $this->generateNextOccurrence($task);
         }
 
-        // Fertilize replaces watering — auto-skip any pending water task for this plant
-        if ($task['task_type'] === 'fertilize') {
-            $today = date('Y-m-d');
-            $waterStmt = db()->prepare('
-                SELECT id, recurrence FROM tasks
-                WHERE plant_id = ? AND task_type = "water"
-                  AND due_date <= ? AND completed_at IS NULL AND skipped_at IS NULL
-                LIMIT 1
+        // Fertilize and water are interchangeable (fertilizer mixed with water)
+        // When one is completed, skip the other and reschedule from today
+        if ($task['task_type'] === 'fertilize' || $task['task_type'] === 'water') {
+            $siblingType = $task['task_type'] === 'fertilize' ? 'water' : 'fertilize';
+            $siblingStmt = db()->prepare('
+                SELECT id, recurrence, due_date, care_plan_id, plant_id, task_type, instructions, priority FROM tasks
+                WHERE plant_id = ? AND task_type = ?
+                  AND completed_at IS NULL AND skipped_at IS NULL
+                ORDER BY due_date ASC LIMIT 1
             ');
-            $waterStmt->execute([$task['plant_id'], $today]);
-            $waterTask = $waterStmt->fetch();
-            if ($waterTask) {
+            $siblingStmt->execute([$task['plant_id'], $siblingType]);
+            $siblingTask = $siblingStmt->fetch();
+            if ($siblingTask) {
+                $reason = $task['task_type'] === 'fertilize'
+                    ? 'Auto-skipped: plant fertilized (fertilizer mixed with water)'
+                    : 'Auto-skipped: plant watered (counts toward fertilize schedule)';
                 $skipStmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
-                $skipStmt->execute(['Auto-skipped: plant being fertilized (fertilizer mixed with water)', $waterTask['id']]);
-                if ($waterTask['recurrence']) {
-                    $this->generateNextOccurrence($waterTask, 'skip');
+                $skipStmt->execute([$reason, $siblingTask['id']]);
+                // Reschedule sibling from today using its own interval
+                if ($siblingTask['recurrence']) {
+                    $this->generateNextOccurrence($siblingTask, 'skip');
+                }
+            }
+
+            // Also reschedule the next pending task of the SAME type if it's too soon
+            // (e.g. water completed today, but next water is in 1 day when interval is 7)
+            $nextSameStmt = db()->prepare('
+                SELECT id, due_date, recurrence FROM tasks
+                WHERE plant_id = ? AND task_type = ?
+                  AND completed_at IS NULL AND skipped_at IS NULL
+                ORDER BY due_date ASC LIMIT 1
+            ');
+            $nextSameStmt->execute([$task['plant_id'], $task['task_type']]);
+            $nextSame = $nextSameStmt->fetch();
+            if ($nextSame && $nextSame['recurrence']) {
+                $recurrence = json_decode($nextSame['recurrence'], true);
+                $interval = $recurrence['interval'] ?? 7;
+                $minNextDate = date('Y-m-d', strtotime("+$interval days"));
+                if ($nextSame['due_date'] < $minNextDate) {
+                    // Too soon — push it out
+                    $updateStmt = db()->prepare('UPDATE tasks SET due_date = ? WHERE id = ?');
+                    $updateStmt->execute([$minNextDate, $nextSame['id']]);
                 }
             }
         }
@@ -1589,19 +1566,18 @@ Consider:
             $nextDate = date('Y-m-d', max($fromDueDate, $fromToday));
         }
 
-        // Check if a similar pending task already exists to prevent duplicates
+        // Check if ANY pending task of this type already exists for this plant
         $stmt = db()->prepare('
             SELECT id FROM tasks
             WHERE plant_id = ?
               AND task_type = ?
-              AND due_date = ?
               AND completed_at IS NULL
               AND skipped_at IS NULL
             LIMIT 1
         ');
-        $stmt->execute([$task['plant_id'], $task['task_type'], $nextDate]);
+        $stmt->execute([$task['plant_id'], $task['task_type']]);
         if ($stmt->fetch()) {
-            // Task already exists for this date, skip creation
+            // A pending task of this type already exists, skip creation
             return;
         }
 
@@ -1618,5 +1594,89 @@ Consider:
             $task['instructions'],
             $task['priority']
         ]);
+    }
+
+    /**
+     * Daily reconciliation: check all pending tasks against actual care history.
+     * If a plant was recently watered/fertilized but still has a pending water task
+     * that's too soon, push it out. Also skip redundant water+fertilize on same day.
+     */
+    private function reconcileOverdueTasks(int $userId, string $accessCondition): void
+    {
+        $today = date('Y-m-d');
+
+        // Find all pending water/fertilize tasks for user's plants
+        $stmt = db()->query("
+            SELECT t.id, t.plant_id, t.task_type, t.due_date, t.recurrence
+            FROM tasks t
+            JOIN plants p ON t.plant_id = p.id
+            WHERE {$accessCondition}
+              AND t.task_type IN ('water', 'fertilize')
+              AND t.completed_at IS NULL
+              AND t.skipped_at IS NULL
+              AND t.due_date <= '{$today}'
+              AND p.archived_at IS NULL
+            ORDER BY t.plant_id, t.task_type
+        ");
+        $pendingTasks = $stmt->fetchAll();
+
+        foreach ($pendingTasks as $task) {
+            $recurrence = json_decode($task['recurrence'], true);
+            $interval = $recurrence['interval'] ?? 7;
+
+            // Check when this plant was last watered OR fertilized (they're interchangeable)
+            $logStmt = db()->prepare('
+                SELECT MAX(performed_at) as last_action
+                FROM care_log
+                WHERE plant_id = ? AND action IN ("water", "fertilize")
+            ');
+            $logStmt->execute([$task['plant_id']]);
+            $lastAction = $logStmt->fetch();
+
+            if ($lastAction && $lastAction['last_action']) {
+                $daysSinceAction = (int)((strtotime($today) - strtotime($lastAction['last_action'])) / 86400);
+
+                if ($daysSinceAction < $interval) {
+                    // Plant was recently cared for — push this task out
+                    $newDueDate = date('Y-m-d', strtotime($lastAction['last_action'] . " +{$interval} days"));
+                    if ($newDueDate > $today) {
+                        $updateStmt = db()->prepare('UPDATE tasks SET due_date = ? WHERE id = ?');
+                        $updateStmt->execute([$newDueDate, $task['id']]);
+                    }
+                }
+            }
+        }
+
+        // Remove same-day water+fertilize conflicts: if both pending for same plant,
+        // skip the water task (fertilize takes priority since it includes watering)
+        $stmt2 = db()->query("
+            SELECT t.id, t.plant_id, t.task_type, t.recurrence
+            FROM tasks t
+            JOIN plants p ON t.plant_id = p.id
+            WHERE {$accessCondition}
+              AND t.task_type IN ('water', 'fertilize')
+              AND t.completed_at IS NULL AND t.skipped_at IS NULL
+              AND t.due_date <= '{$today}'
+              AND p.archived_at IS NULL
+        ");
+        $remaining = $stmt2->fetchAll();
+
+        // Group by plant
+        $byPlant = [];
+        foreach ($remaining as $t) {
+            $byPlant[$t['plant_id']][$t['task_type']] = $t;
+        }
+
+        foreach ($byPlant as $plantId => $types) {
+            if (isset($types['water']) && isset($types['fertilize'])) {
+                // Both due — skip the water task
+                $waterTask = $types['water'];
+                $skipStmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
+                $skipStmt->execute(['Auto-skipped: fertilize task covers watering', $waterTask['id']]);
+                if ($waterTask['recurrence']) {
+                    $this->generateNextOccurrence($waterTask, 'skip');
+                }
+            }
+        }
     }
 }
