@@ -168,10 +168,30 @@ class CronController
     }
 
     /**
+     * Get task types the user has disabled in settings
+     */
+    private function getDisabledTaskTypes(int $userId): array
+    {
+        $stmt = db()->prepare('SELECT task_type FROM task_type_settings WHERE user_id = ? AND enabled = 0');
+        $stmt->execute([$userId]);
+        return $stmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    /**
      * Get today's pending tasks for a user
+     * Excludes archived (dead) plants and task types the user has disabled.
      */
     private function getUserTasks(int $userId, string $today): array
     {
+        $disabled = $this->getDisabledTaskTypes($userId);
+        $disabledClause = '';
+        $bindings = [$userId, $today];
+        if (!empty($disabled)) {
+            $placeholders = implode(',', array_fill(0, count($disabled), '?'));
+            $disabledClause = " AND t.task_type NOT IN ({$placeholders})";
+            $bindings = array_merge($bindings, $disabled);
+        }
+
         $stmt = db()->prepare('
             SELECT t.id, t.task_type, t.due_date, t.priority,
                    p.name as plant_name, p.location as plant_location
@@ -181,7 +201,7 @@ class CronController
               AND t.due_date <= ?
               AND t.completed_at IS NULL
               AND t.skipped_at IS NULL
-              AND p.archived_at IS NULL
+              AND p.archived_at IS NULL' . $disabledClause . '
             ORDER BY
                 CASE t.priority
                     WHEN "urgent" THEN 1
@@ -192,7 +212,7 @@ class CronController
                 END,
                 t.due_date ASC
         ');
-        $stmt->execute([$userId, $today]);
+        $stmt->execute($bindings);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
