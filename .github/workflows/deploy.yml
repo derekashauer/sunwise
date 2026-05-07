@@ -15,6 +15,7 @@ jobs:
     environment: production
     env:
       REMOTE_PATH: ~/www/dereka328.sg-host.com/public_html
+      SSH_OPTS: -o ControlMaster=auto -o ControlPath=/tmp/ssh-%r@%h:%p -o ControlPersist=10m
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,49 +40,45 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Add server to known_hosts
+      - name: Add server to known_hosts and open SSH master connection
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
-
-      - name: Clean stale frontend assets on server
-        run: |
-          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "cd $REMOTE_PATH && rm -rf assets sw.js workbox-*.js registerSW.js manifest.webmanifest"
+          ssh $SSH_OPTS -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd $REMOTE_PATH && rm -rf assets sw.js workbox-*.js registerSW.js manifest.webmanifest && echo 'Master connection up; stale assets cleaned'"
 
       - name: Deploy frontend
         run: |
           rsync -avz \
-            -e "ssh -p ${{ secrets.SSH_PORT }}" \
+            -e "ssh $SSH_OPTS -p ${{ secrets.SSH_PORT }}" \
             frontend/dist/ \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$REMOTE_PATH/"
 
       - name: Deploy API
         run: |
           rsync -avz --delete \
-            -e "ssh -p ${{ secrets.SSH_PORT }}" \
+            -e "ssh $SSH_OPTS -p ${{ secrets.SSH_PORT }}" \
             api/ \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$REMOTE_PATH/api/"
 
       - name: Deploy .htaccess
         run: |
-          scp -P "${{ secrets.SSH_PORT }}" .htaccess \
+          rsync -avz \
+            -e "ssh $SSH_OPTS -p ${{ secrets.SSH_PORT }}" \
+            .htaccess \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$REMOTE_PATH/.htaccess"
 
-      - name: Clear server caches
+      - name: Clear caches, run migrations, verify
         run: |
-          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+          ssh $SSH_OPTS -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
             "cd $REMOTE_PATH && \
               rm -f data/cache/*.json data/cache/*.tmp 2>/dev/null || true; \
               find . -name '*.cache' -delete 2>/dev/null || true; \
-              echo 'Caches cleared'"
+              echo 'Caches cleared'; \
+              php -r 'require \"api/config/config.php\"; require \"api/config/database.php\"; Database::runMigrations(); echo \"Migrations complete\n\";'; \
+              echo \"Frontend asset files: \$(ls assets/*.js 2>/dev/null | wc -l)\""
 
-      - name: Run database migrations
+      - name: Close SSH master connection
+        if: always()
         run: |
-          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "cd $REMOTE_PATH && php -r 'require \"api/config/config.php\"; require \"api/config/database.php\"; Database::runMigrations(); echo \"Migrations complete\n\";'"
-
-      - name: Verify deployment
-        run: |
-          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "ls $REMOTE_PATH/assets/*.js 2>/dev/null | wc -l | xargs -I{} echo 'Frontend asset files: {}'"
+          ssh $SSH_OPTS -O exit -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 2>/dev/null || true
