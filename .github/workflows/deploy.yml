@@ -1,0 +1,87 @@
+name: Deploy to Production
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      REMOTE_PATH: ~/www/dereka328.sg-host.com/public_html
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add server to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Clean stale frontend assets on server
+        run: |
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd $REMOTE_PATH && rm -rf assets sw.js workbox-*.js registerSW.js manifest.webmanifest"
+
+      - name: Deploy frontend
+        run: |
+          rsync -avz \
+            -e "ssh -p ${{ secrets.SSH_PORT }}" \
+            frontend/dist/ \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$REMOTE_PATH/"
+
+      - name: Deploy API
+        run: |
+          rsync -avz --delete \
+            -e "ssh -p ${{ secrets.SSH_PORT }}" \
+            api/ \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$REMOTE_PATH/api/"
+
+      - name: Deploy .htaccess
+        run: |
+          scp -P "${{ secrets.SSH_PORT }}" .htaccess \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$REMOTE_PATH/.htaccess"
+
+      - name: Clear server caches
+        run: |
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd $REMOTE_PATH && \
+              rm -f data/cache/*.json data/cache/*.tmp 2>/dev/null || true; \
+              find . -name '*.cache' -delete 2>/dev/null || true; \
+              echo 'Caches cleared'"
+
+      - name: Run database migrations
+        run: |
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd $REMOTE_PATH && php -r 'require \"api/config/config.php\"; require \"api/config/database.php\"; Database::runMigrations(); echo \"Migrations complete\n\";'"
+
+      - name: Verify deployment
+        run: |
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "ls $REMOTE_PATH/assets/*.js 2>/dev/null | wc -l | xargs -I{} echo 'Frontend asset files: {}'"
