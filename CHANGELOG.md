@@ -2,6 +2,14 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.14.2] - 2026-05-07
+
+### Fixed
+- **Daily email respects task-type settings** - Daily summary emails now honor the user's per-task-type notification preferences and skip dead plants
+
+### Changed
+- **Deployment moved to GitHub Actions** - Releases published on GitHub now trigger an automated deploy workflow (build, sync frontend/api, clear caches, run migrations) using SSH multiplexing to stay under shared-hosting connection limits
+
 ## [0.14.1] - 2026-04-06
 
 ### Fixed
