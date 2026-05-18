@@ -99,10 +99,10 @@ class AIServiceFactory
      */
     public static function getForUser(int $userId, ?string $provider = null): AIServiceInterface
     {
-        // Get user's AI settings
+        // Get user's AI settings ($stmt->fetch() returns false, not null, when no row exists)
         $stmt = db()->prepare('SELECT * FROM ai_settings WHERE user_id = ?');
         $stmt->execute([$userId]);
-        $settings = $stmt->fetch();
+        $settings = $stmt->fetch() ?: null;
 
         // Determine which provider to use
         $useProvider = $provider ?? ($settings['default_provider'] ?? 'openai');

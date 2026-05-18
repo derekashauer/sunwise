@@ -2,6 +2,11 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.14.4] - 2026-05-18
+
+### Fixed
+- **Care plan generation crashed for users with no AI settings row** - `PDOStatement::fetch()` returns `false` when no row matches, but the downstream `?array` type hint rejected it. Coerce to null so the lookup falls back through the normal provider/server-key chain
+
 ## [0.14.3] - 2026-05-17
 
 ### Fixed
