@@ -2,6 +2,14 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.14.3] - 2026-05-17
+
+### Fixed
+- **Fertilizer tasks were silently hidden** - "Today" view required ≥3 fertilize tasks due on the same day or none would render. Removed the batching gate so fertilize tasks appear normally when due
+- **Water-task chain broke after high-moisture check auto-skip** - The auto-skip path fetched only `id` and `recurrence` for the water task and passed that incomplete row to the next-occurrence generator. The follow-up INSERT failed silently on NOT NULL constraints, so no replacement task was created. The SELECT now returns all required columns, and the generator now logs (instead of silently failing) when a caller passes a partial row
+- **Watering a plant no longer skips its pending fertilize task** - Sibling auto-skip was bidirectional; every routine watering pushed the next fertilize task ~7 days out, so fertilize never naturally came due. Sibling skip is now one-directional: completing a fertilize task still skips the pending water (fertilizer is mixed with water), but the reverse no longer happens
+- **Care-plan regeneration is now atomic** - The previous flow deactivated existing plans and deleted pending tasks BEFORE the AI call. Any error in between left plants orphaned with no active plan and no tasks. Regeneration is now wrapped in a transaction with the AI call moved earlier — on any failure the previous plan and tasks are preserved
+
 ## [0.14.2] - 2026-05-07
 
 ### Fixed

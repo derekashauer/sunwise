@@ -116,26 +116,6 @@ class TaskController
 
         $tasks = $stmt->fetchAll();
 
-        // Fertilize batching: only show fertilize tasks when enough are naturally due
-        // Never pull forward — only batch what's already due today or overdue
-        $pendingFertilize = [];
-        $otherTasks = [];
-        foreach ($tasks as $t) {
-            if ($t['task_type'] === 'fertilize' && !$t['completed_at']) {
-                $pendingFertilize[] = $t;
-            } else {
-                $otherTasks[] = $t;
-            }
-        }
-
-        if (count($pendingFertilize) >= 3) {
-            // Enough fertilize tasks are naturally due — show them all
-            $tasks = array_merge($otherTasks, $pendingFertilize);
-        } else {
-            // Not enough for a batch — hide fertilize tasks, they'll accumulate
-            $tasks = $otherTasks;
-        }
-
         return ['tasks' => $tasks];
     }
 
@@ -257,48 +237,23 @@ class TaskController
             $this->generateNextOccurrence($task);
         }
 
-        // Fertilize and water are interchangeable (fertilizer mixed with water)
-        // When one is completed, skip the other and reschedule from today
-        if ($task['task_type'] === 'fertilize' || $task['task_type'] === 'water') {
-            $siblingType = $task['task_type'] === 'fertilize' ? 'water' : 'fertilize';
+        // Fertilizing waters the plant too (fertilizer is mixed with water), so when a
+        // fertilize task is completed, skip the next pending water task. The reverse
+        // is NOT true: routine watering doesn't satisfy the fertilize schedule.
+        if ($task['task_type'] === 'fertilize') {
             $siblingStmt = db()->prepare('
                 SELECT id, recurrence, due_date, care_plan_id, plant_id, task_type, instructions, priority FROM tasks
-                WHERE plant_id = ? AND task_type = ?
+                WHERE plant_id = ? AND task_type = "water"
                   AND completed_at IS NULL AND skipped_at IS NULL
                 ORDER BY due_date ASC LIMIT 1
             ');
-            $siblingStmt->execute([$task['plant_id'], $siblingType]);
+            $siblingStmt->execute([$task['plant_id']]);
             $siblingTask = $siblingStmt->fetch();
             if ($siblingTask) {
-                $reason = $task['task_type'] === 'fertilize'
-                    ? 'Auto-skipped: plant fertilized (fertilizer mixed with water)'
-                    : 'Auto-skipped: plant watered (counts toward fertilize schedule)';
                 $skipStmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
-                $skipStmt->execute([$reason, $siblingTask['id']]);
-                // Reschedule sibling from today using its own interval
+                $skipStmt->execute(['Auto-skipped: plant fertilized (fertilizer mixed with water)', $siblingTask['id']]);
                 if ($siblingTask['recurrence']) {
                     $this->generateNextOccurrence($siblingTask, 'skip');
-                }
-            }
-
-            // Also reschedule the next pending task of the SAME type if it's too soon
-            // (e.g. water completed today, but next water is in 1 day when interval is 7)
-            $nextSameStmt = db()->prepare('
-                SELECT id, due_date, recurrence FROM tasks
-                WHERE plant_id = ? AND task_type = ?
-                  AND completed_at IS NULL AND skipped_at IS NULL
-                ORDER BY due_date ASC LIMIT 1
-            ');
-            $nextSameStmt->execute([$task['plant_id'], $task['task_type']]);
-            $nextSame = $nextSameStmt->fetch();
-            if ($nextSame && $nextSame['recurrence']) {
-                $recurrence = json_decode($nextSame['recurrence'], true);
-                $interval = $recurrence['interval'] ?? 7;
-                $minNextDate = date('Y-m-d', strtotime("+$interval days"));
-                if ($nextSame['due_date'] < $minNextDate) {
-                    // Too soon — push it out
-                    $updateStmt = db()->prepare('UPDATE tasks SET due_date = ? WHERE id = ?');
-                    $updateStmt->execute([$minNextDate, $nextSame['id']]);
                 }
             }
         }
@@ -452,7 +407,8 @@ class TaskController
         if ($moisture !== null && $moisture >= 7) {
             $today = date('Y-m-d');
             $stmt = db()->prepare('
-                SELECT id, recurrence FROM tasks
+                SELECT id, plant_id, task_type, due_date, recurrence, care_plan_id, instructions, priority
+                FROM tasks
                 WHERE plant_id = ? AND task_type = "water"
                   AND due_date <= ? AND completed_at IS NULL AND skipped_at IS NULL
                 LIMIT 1
@@ -1532,6 +1488,16 @@ Consider:
      */
     private function generateNextOccurrence(array $task, string $mode = 'complete'): void
     {
+        // Required fields for the INSERT — surface bugs loudly instead of failing
+        // silently when callers pass a partial row (NOT NULL violations are swallowed
+        // under PDO::ERRMODE_SILENT).
+        foreach (['plant_id', 'task_type'] as $required) {
+            if (empty($task[$required])) {
+                error_log("generateNextOccurrence: missing required field '$required' for task " . ($task['id'] ?? 'unknown'));
+                return;
+            }
+        }
+
         $recurrence = json_decode($task['recurrence'], true);
         if (!$recurrence) return;
 

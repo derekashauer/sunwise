@@ -177,10 +177,6 @@ class CarePlanController
             $plant['care_history_stats'] = $completedTaskStats;
         }
 
-        // Deactivate existing care plans and delete pending tasks
-        $stmt = db()->prepare('UPDATE care_plans SET is_active = 0 WHERE plant_id = ?');
-        $stmt->execute([$plantId]);
-
         // Remember most recent completion date per task type (to avoid scheduling too soon)
         $stmt = db()->prepare('
             SELECT task_type, MAX(completed_at) as last_completed,
@@ -198,15 +194,6 @@ class CarePlanController
             ];
         }
 
-        // Delete pending tasks from old care plans (keep completed/skipped for history)
-        $stmt = db()->prepare('
-            DELETE FROM tasks
-            WHERE plant_id = ?
-              AND completed_at IS NULL
-              AND skipped_at IS NULL
-        ');
-        $stmt->execute([$plantId]);
-
         // Determine season
         $month = (int) date('n');
         if ($month >= 3 && $month <= 5) {
@@ -219,7 +206,10 @@ class CarePlanController
             $season = 'winter';
         }
 
-        // Generate care plan with AI - use AIServiceFactory to get user's preferred provider
+        // Generate care plan with AI BEFORE mutating any state — if the AI call (or
+        // anything else here) throws, we leave the plant's existing plan and tasks
+        // alone. Previously this ran AFTER deactivating + deleting, which left plants
+        // orphaned (no active plan, no pending tasks) on partial failure.
         try {
             $effectiveUserId = $userId ?? $plant['user_id'];
             $aiService = AIServiceFactory::getForUser($effectiveUserId);
@@ -231,81 +221,103 @@ class CarePlanController
             $aiPlan = $this->getDefaultCarePlan($plant, $season);
         }
 
-        // Create care plan record
-        $stmt = db()->prepare('
-            INSERT INTO care_plans (plant_id, season, ai_reasoning, next_photo_check, photo_check_reason, valid_until)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ');
-        $stmt->execute([
-            $plantId,
-            $season,
-            $aiPlan['reasoning'] ?? null,
-            $aiPlan['next_photo_check'] ?? date('Y-m-d', strtotime('+14 days')),
-            $aiPlan['photo_check_reason'] ?? 'Regular health check',
-            date('Y-m-d', strtotime('+3 months'))
-        ]);
-        $carePlanId = db()->lastInsertId();
-
         // Get user's enabled task types
         $enabledTaskTypes = $this->getEnabledTaskTypes($plant['user_id']);
 
-        // Create tasks from AI plan (filter by enabled types)
-        if (!empty($aiPlan['tasks'])) {
-            foreach ($aiPlan['tasks'] as $task) {
-                // Skip if task type is disabled
-                if (!in_array($task['type'], $enabledTaskTypes)) {
-                    continue;
-                }
+        // Atomic swap: deactivate old plans + delete pending tasks + create new plan + tasks.
+        // Rolls back on any error so we never end up with a half-applied state.
+        $db = db();
+        $db->beginTransaction();
+        try {
+            $stmt = $db->prepare('UPDATE care_plans SET is_active = 0 WHERE plant_id = ?');
+            $stmt->execute([$plantId]);
 
-                // Skip rotate tasks if plant's can_rotate is false
-                if ($task['type'] === 'rotate' && isset($plant['can_rotate']) && !$plant['can_rotate']) {
-                    continue;
-                }
+            $stmt = $db->prepare('
+                DELETE FROM tasks
+                WHERE plant_id = ?
+                  AND completed_at IS NULL
+                  AND skipped_at IS NULL
+            ');
+            $stmt->execute([$plantId]);
 
-                // Enforce minimum check interval of 7 days
-                if ($task['type'] === 'check' && isset($task['recurrence']['interval']) && $task['recurrence']['interval'] < 7) {
-                    $task['recurrence']['interval'] = 7;
-                }
+            $stmt = $db->prepare('
+                INSERT INTO care_plans (plant_id, season, ai_reasoning, next_photo_check, photo_check_reason, valid_until)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ');
+            $stmt->execute([
+                $plantId,
+                $season,
+                $aiPlan['reasoning'] ?? null,
+                $aiPlan['next_photo_check'] ?? date('Y-m-d', strtotime('+14 days')),
+                $aiPlan['photo_check_reason'] ?? 'Regular health check',
+                date('Y-m-d', strtotime('+3 months'))
+            ]);
+            $carePlanId = $db->lastInsertId();
 
-                // Propagation task validation
-                if (!empty($plant['is_propagation'])) {
-                    // Water propagations: no water, fertilize, or rotate tasks
-                    if ($plant['soil_type'] === 'water' && in_array($task['type'], ['water', 'fertilize', 'rotate'])) {
+            // Create tasks from AI plan (filter by enabled types)
+            if (!empty($aiPlan['tasks'])) {
+                foreach ($aiPlan['tasks'] as $task) {
+                    // Skip if task type is disabled
+                    if (!in_array($task['type'], $enabledTaskTypes)) {
                         continue;
                     }
-                    // Rooting medium propagations: no change_water tasks
-                    if ($plant['soil_type'] !== 'water' && $task['type'] === 'change_water') {
+
+                    // Skip rotate tasks if plant's can_rotate is false
+                    if ($task['type'] === 'rotate' && isset($plant['can_rotate']) && !$plant['can_rotate']) {
                         continue;
                     }
-                }
 
-                // Adjust due date if this task type was recently completed
-                $dueDate = $task['due_date'];
-                if (isset($recentCompletions[$task['type']])) {
-                    $lastDone = $recentCompletions[$task['type']]['date'];
-                    $interval = isset($task['recurrence']['interval']) ? $task['recurrence']['interval'] : ($recentCompletions[$task['type']]['interval'] ?? 7);
-                    $earliestNext = date('Y-m-d', strtotime("$lastDone +$interval days"));
-                    $today = date('Y-m-d');
-                    // Don't schedule before the interval has elapsed since last completion
-                    if ($dueDate < $earliestNext) {
-                        $dueDate = max($earliestNext, $today);
+                    // Enforce minimum check interval of 7 days
+                    if ($task['type'] === 'check' && isset($task['recurrence']['interval']) && $task['recurrence']['interval'] < 7) {
+                        $task['recurrence']['interval'] = 7;
                     }
-                }
 
-                $stmt = db()->prepare('
-                    INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, instructions, priority)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ');
-                $stmt->execute([
-                    $carePlanId,
-                    $plantId,
-                    $task['type'],
-                    $dueDate,
-                    isset($task['recurrence']) ? json_encode($task['recurrence']) : null,
-                    $task['instructions'] ?? null,
-                    $task['priority'] ?? 'normal'
-                ]);
+                    // Propagation task validation
+                    if (!empty($plant['is_propagation'])) {
+                        // Water propagations: no water, fertilize, or rotate tasks
+                        if ($plant['soil_type'] === 'water' && in_array($task['type'], ['water', 'fertilize', 'rotate'])) {
+                            continue;
+                        }
+                        // Rooting medium propagations: no change_water tasks
+                        if ($plant['soil_type'] !== 'water' && $task['type'] === 'change_water') {
+                            continue;
+                        }
+                    }
+
+                    // Adjust due date if this task type was recently completed
+                    $dueDate = $task['due_date'];
+                    if (isset($recentCompletions[$task['type']])) {
+                        $lastDone = $recentCompletions[$task['type']]['date'];
+                        $interval = isset($task['recurrence']['interval']) ? $task['recurrence']['interval'] : ($recentCompletions[$task['type']]['interval'] ?? 7);
+                        $earliestNext = date('Y-m-d', strtotime("$lastDone +$interval days"));
+                        $today = date('Y-m-d');
+                        // Don't schedule before the interval has elapsed since last completion
+                        if ($dueDate < $earliestNext) {
+                            $dueDate = max($earliestNext, $today);
+                        }
+                    }
+
+                    $stmt = $db->prepare('
+                        INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, instructions, priority)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ');
+                    $stmt->execute([
+                        $carePlanId,
+                        $plantId,
+                        $task['type'],
+                        $dueDate,
+                        isset($task['recurrence']) ? json_encode($task['recurrence']) : null,
+                        $task['instructions'] ?? null,
+                        $task['priority'] ?? 'normal'
+                    ]);
+                }
             }
+
+            $db->commit();
+        } catch (Exception $e) {
+            $db->rollBack();
+            error_log('Care plan regeneration failed (rolled back): ' . $e->getMessage());
+            throw $e;
         }
 
         // Get created care plan
