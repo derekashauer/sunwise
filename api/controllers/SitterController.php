@@ -102,14 +102,21 @@ class SitterController
         $stmt->execute([$session['id']]);
         $plants = $stmt->fetchAll();
 
-        // Get tasks for session date range, filtered by allowed task types.
-        // Include pre-session overdue tasks the owner left pending — they "roll
-        // over" into the sitter's window so nothing gets dropped just because
-        // the sitter doesn't come on day one. Cap at end_date so we never show
-        // future tasks beyond the window.
+        // What the sitter should see right now:
+        //   - Pending: tasks whose due_date is on or before today (overdue from
+        //     before the session rolls over too), bounded by session end_date.
+        //     Future tasks in the window are deliberately hidden — each plant
+        //     follows its own schedule; a task due June 10 shouldn't appear
+        //     until June 10.
+        //   - Completed: ONLY tasks the sitter themself completed during this
+        //     session (notes='Completed by sitter' is the marker the sitter
+        //     completion endpoint writes). The plant's full historical
+        //     completion log is the owner's view, not the sitter's.
+        $upperBound = min(date('Y-m-d'), $session['end_date']);
+
         $taskTypes = $session['task_types'] ? json_decode($session['task_types'], true) : null;
         $taskTypeFilter = '';
-        $taskParams = [$session['id'], $session['end_date']];
+        $taskParams = [$session['id'], $upperBound, $session['start_date']];
         if ($taskTypes && is_array($taskTypes)) {
             $placeholders = implode(',', array_fill(0, count($taskTypes), '?'));
             $taskTypeFilter = "AND t.task_type IN ($placeholders)";
@@ -125,8 +132,11 @@ class SitterController
             JOIN plants p ON t.plant_id = p.id
             LEFT JOIN locations l ON p.location_id = l.id
             WHERE sp.session_id = ?
-              AND t.due_date <= ?
               AND t.skipped_at IS NULL
+              AND (
+                  (t.completed_at IS NULL AND t.due_date <= ?)
+                  OR (t.notes = 'Completed by sitter' AND date(t.completed_at) >= ?)
+              )
               $taskTypeFilter
             ORDER BY t.due_date ASC, t.priority ASC
         ");

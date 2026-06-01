@@ -2,6 +2,14 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.14.8] - 2026-05-18
+
+### Fixed
+- **Sitter share view showed every task in the entire window on day one** - Previous query returned anything with `due_date <= end_date`, so on June 3 the sitter saw all of the next 14 days at once. Now bounded by today, so each visit shows only what's currently due (plus rolled-over overdue). New due tasks surface naturally as the days pass
+
+### Changed
+- **Completed section shows only this sitter's completions** - Was returning the plant's full historical completion log. Now filters to tasks marked "Completed by sitter" since the session start date
+
 ## [0.14.7] - 2026-05-18
 
 ### Changed
