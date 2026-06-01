@@ -2,6 +2,13 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.14.6] - 2026-05-18
+
+### Fixed
+- **Share view "Unassigned" location for every plant** - Sitter queries selected `p.location` (legacy text column) instead of joining `locations` via `location_id`. Plants migrated to the structured location system showed empty. Both the plants and tasks queries now `COALESCE(l.name, p.location)`
+- **Sitter completions broke the recurring chain** - When the sitter completed a task via their share URL, the task was marked done but no next occurrence was generated and no sibling-skip ran. Extracted the post-completion side effects into a shared `TaskController::runCompletionSideEffects` and call it from both owner and sitter flows
+- **Pre-session overdue tasks were hidden from the sitter** - Tasks the owner left pending before the share window started weren't visible to the sitter. Query now includes anything with `due_date <= end_date` so missed work rolls over into the sitter's window
+
 ## [0.14.5] - 2026-05-18
 
 ### Fixed

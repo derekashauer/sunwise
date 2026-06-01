@@ -86,21 +86,30 @@ class SitterController
         $stmt = db()->prepare('UPDATE sitter_sessions SET accessed_at = datetime("now") WHERE id = ?');
         $stmt->execute([$session['id']]);
 
-        // Get plants in session
+        // Get plants in session. Location lives in the `locations` table via
+        // location_id; the legacy p.location text column is empty for plants
+        // organized after structured locations were introduced. Fall back to it
+        // for any legacy plants that haven't been migrated.
         $stmt = db()->prepare('
-            SELECT p.id, p.name, p.species, p.location,
+            SELECT p.id, p.name, p.species,
+                   COALESCE(l.name, p.location) as location,
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as thumbnail
             FROM sitter_plants sp
             JOIN plants p ON sp.plant_id = p.id
+            LEFT JOIN locations l ON p.location_id = l.id
             WHERE sp.session_id = ?
         ');
         $stmt->execute([$session['id']]);
         $plants = $stmt->fetchAll();
 
-        // Get tasks for session date range, filtered by allowed task types
+        // Get tasks for session date range, filtered by allowed task types.
+        // Include pre-session overdue tasks the owner left pending — they "roll
+        // over" into the sitter's window so nothing gets dropped just because
+        // the sitter doesn't come on day one. Cap at end_date so we never show
+        // future tasks beyond the window.
         $taskTypes = $session['task_types'] ? json_decode($session['task_types'], true) : null;
         $taskTypeFilter = '';
-        $taskParams = [$session['id'], $session['start_date'], $session['end_date']];
+        $taskParams = [$session['id'], $session['end_date']];
         if ($taskTypes && is_array($taskTypes)) {
             $placeholders = implode(',', array_fill(0, count($taskTypes), '?'));
             $taskTypeFilter = "AND t.task_type IN ($placeholders)";
@@ -108,13 +117,15 @@ class SitterController
         }
         $stmt = db()->prepare("
             SELECT t.id, t.task_type, t.due_date, t.instructions, t.priority, t.completed_at,
-                   p.name as plant_name, p.location as plant_location,
+                   p.name as plant_name,
+                   COALESCE(l.name, p.location) as plant_location,
                    (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail
             FROM tasks t
             JOIN sitter_plants sp ON t.plant_id = sp.plant_id
             JOIN plants p ON t.plant_id = p.id
+            LEFT JOIN locations l ON p.location_id = l.id
             WHERE sp.session_id = ?
-              AND t.due_date BETWEEN ? AND ?
+              AND t.due_date <= ?
               AND t.skipped_at IS NULL
               $taskTypeFilter
             ORDER BY t.due_date ASC, t.priority ASC
@@ -143,7 +154,9 @@ class SitterController
         $token = $params['token'];
         $taskId = $params['id'];
 
-        // Verify session and task
+        // Verify session and task. Include pre-session overdue tasks for the
+        // same reason as the show() query — anything still pending at session
+        // end is fair game for the sitter.
         $stmt = db()->prepare('
             SELECT s.id as session_id, t.*
             FROM sitter_sessions s
@@ -152,7 +165,7 @@ class SitterController
             WHERE s.token = ?
               AND t.id = ?
               AND s.end_date >= date("now", "-1 day")
-              AND t.due_date BETWEEN s.start_date AND s.end_date
+              AND t.due_date <= s.end_date
         ');
         $stmt->execute([$token, $taskId]);
         $task = $stmt->fetch();
@@ -180,6 +193,11 @@ class SitterController
             $task['task_type'],
             'Completed by sitter'
         ]);
+
+        // Continue the recurring chain and run sibling-skip logic — same as
+        // when the owner completes a task. Without this the schedule stops
+        // dead as soon as the sitter touches anything.
+        (new TaskController())->runCompletionSideEffects($task);
 
         // Get updated task
         $stmt = db()->prepare('SELECT * FROM tasks WHERE id = ?');

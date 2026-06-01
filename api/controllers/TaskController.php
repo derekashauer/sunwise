@@ -232,31 +232,7 @@ class TaskController
             $checkDataJson
         ]);
 
-        // Generate next occurrence if recurring
-        if ($task['recurrence']) {
-            $this->generateNextOccurrence($task);
-        }
-
-        // Fertilizing waters the plant too (fertilizer is mixed with water), so when a
-        // fertilize task is completed, skip the next pending water task. The reverse
-        // is NOT true: routine watering doesn't satisfy the fertilize schedule.
-        if ($task['task_type'] === 'fertilize') {
-            $siblingStmt = db()->prepare('
-                SELECT id, recurrence, due_date, care_plan_id, plant_id, task_type, instructions, priority FROM tasks
-                WHERE plant_id = ? AND task_type = "water"
-                  AND completed_at IS NULL AND skipped_at IS NULL
-                ORDER BY due_date ASC LIMIT 1
-            ');
-            $siblingStmt->execute([$task['plant_id']]);
-            $siblingTask = $siblingStmt->fetch();
-            if ($siblingTask) {
-                $skipStmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
-                $skipStmt->execute(['Auto-skipped: plant fertilized (fertilizer mixed with water)', $siblingTask['id']]);
-                if ($siblingTask['recurrence']) {
-                    $this->generateNextOccurrence($siblingTask, 'skip');
-                }
-            }
-        }
+        $this->runCompletionSideEffects($task);
 
         // Get updated task
         $stmt = db()->prepare('SELECT * FROM tasks WHERE id = ?');
@@ -1486,6 +1462,41 @@ Consider:
      * Generate next occurrence of recurring task
      * @param string $mode 'complete' or 'skip' — skip uses shorter type-based delays
      */
+    /**
+     * Run the side effects that should follow ANY task completion, regardless of
+     * who completed it (owner, sitter, etc.): generate the next occurrence so the
+     * recurring chain continues, and auto-skip the sibling water task if a
+     * fertilize task was just completed (fertilizer is mixed with water).
+     *
+     * Callers are responsible for marking the task completed and writing the
+     * care_log entry before invoking this — those steps differ slightly between
+     * the owner flow (attribution + check data) and the sitter flow (token-based).
+     */
+    public function runCompletionSideEffects(array $task): void
+    {
+        if ($task['recurrence']) {
+            $this->generateNextOccurrence($task);
+        }
+
+        if ($task['task_type'] === 'fertilize') {
+            $siblingStmt = db()->prepare('
+                SELECT id, recurrence, due_date, care_plan_id, plant_id, task_type, instructions, priority FROM tasks
+                WHERE plant_id = ? AND task_type = "water"
+                  AND completed_at IS NULL AND skipped_at IS NULL
+                ORDER BY due_date ASC LIMIT 1
+            ');
+            $siblingStmt->execute([$task['plant_id']]);
+            $siblingTask = $siblingStmt->fetch();
+            if ($siblingTask) {
+                $skipStmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
+                $skipStmt->execute(['Auto-skipped: plant fertilized (fertilizer mixed with water)', $siblingTask['id']]);
+                if ($siblingTask['recurrence']) {
+                    $this->generateNextOccurrence($siblingTask, 'skip');
+                }
+            }
+        }
+    }
+
     private function generateNextOccurrence(array $task, string $mode = 'complete'): void
     {
         // Required fields for the INSERT — surface bugs loudly instead of failing
