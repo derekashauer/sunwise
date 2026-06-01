@@ -2,6 +2,12 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.14.7] - 2026-05-18
+
+### Changed
+- **Share view now matches the owner's task UI** - Same doodle icons, sage/charcoal/cream palette, card layout, task-type sort order, and priority/overdue badges as the owner's Today view. Sitter no longer feels like a different app
+- **Tap any plant thumbnail to enlarge** - Both task thumbnails and the Plants reference grid open a full-size lightbox, matching the owner view
+
 ## [0.14.6] - 2026-05-18
 
 ### Fixed
