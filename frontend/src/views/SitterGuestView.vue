@@ -33,12 +33,44 @@ onMounted(async () => {
 const pendingTasks = computed(() => tasks.value.filter(t => !t.completed_at))
 const completedTasks = computed(() => tasks.value.filter(t => t.completed_at))
 
+// Parse a 'YYYY-MM-DD' date string as a local date (not UTC). new Date('2026-06-03')
+// parses as UTC midnight, which renders as the previous day in any timezone west of UTC.
+function parseLocalDate(s) {
+  if (!s) return null
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+function formatDate(s, opts = { month: 'short', day: 'numeric' }) {
+  const d = parseLocalDate(s)
+  return d ? d.toLocaleDateString('en-US', opts) : ''
+}
+
 const dateRange = computed(() => {
   if (!session.value) return ''
-  const start = new Date(session.value.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  const end = new Date(session.value.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  return `${start} - ${end}`
+  return `${formatDate(session.value.start_date)} - ${formatDate(session.value.end_date)}`
 })
+
+// Group an array of items (tasks or plants) by their location, returning
+// [{ location, items }] sorted alphabetically with "Unassigned" last.
+function groupByLocation(items, locationKey) {
+  const groups = new Map()
+  for (const item of items) {
+    const loc = item[locationKey] || 'Unassigned'
+    if (!groups.has(loc)) groups.set(loc, [])
+    groups.get(loc).push(item)
+  }
+  return Array.from(groups.entries())
+    .map(([location, items]) => ({ location, items }))
+    .sort((a, b) => {
+      if (a.location === 'Unassigned') return 1
+      if (b.location === 'Unassigned') return -1
+      return a.location.localeCompare(b.location)
+    })
+}
+
+const pendingTasksByLocation = computed(() => groupByLocation(pendingTasks.value, 'plant_location'))
+const plantsByLocation = computed(() => groupByLocation(session.value?.plants || [], 'location'))
 
 async function completeTask(taskId) {
   completingTask.value = taskId
@@ -115,43 +147,43 @@ const taskIcons = {
         <p class="text-sm text-plant-700">{{ session.instructions }}</p>
       </div>
 
-      <!-- Pending tasks -->
+      <!-- Pending tasks, grouped by location -->
       <section v-if="pendingTasks.length > 0" class="mb-6">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
           Tasks ({{ pendingTasks.length }})
         </h2>
-        <div class="space-y-3">
-          <div
-            v-for="task in pendingTasks"
-            :key="task.id"
-            class="card p-4"
-          >
-            <div class="flex items-start gap-4">
-              <button
-                @click="completeTask(task.id)"
-                :disabled="completingTask === task.id"
-                class="w-6 h-6 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all border-gray-300 hover:border-plant-500"
-              >
-                <div v-if="completingTask === task.id" class="w-4 h-4 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
-              </button>
+        <div v-for="group in pendingTasksByLocation" :key="group.location" class="mb-5">
+          <h3 class="text-xs font-semibold text-plant-700 uppercase tracking-wide mb-2 px-1">
+            {{ group.location }}
+          </h3>
+          <div class="space-y-3">
+            <div
+              v-for="task in group.items"
+              :key="task.id"
+              class="card p-4"
+            >
+              <div class="flex items-start gap-4">
+                <button
+                  @click="completeTask(task.id)"
+                  :disabled="completingTask === task.id"
+                  class="w-6 h-6 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all border-gray-300 hover:border-plant-500"
+                >
+                  <div v-if="completingTask === task.id" class="w-4 h-4 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
+                </button>
 
-              <div class="flex-1">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="text-lg">{{ taskIcons[task.task_type] || '📋' }}</span>
-                  <span class="font-medium text-gray-900 capitalize">{{ task.task_type }}</span>
-                  <span class="text-sm text-gray-500">· {{ new Date(task.due_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) }}</span>
+                <div class="flex-1">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="text-lg">{{ taskIcons[task.task_type] || '📋' }}</span>
+                    <span class="font-medium text-gray-900 capitalize">{{ task.task_type }}</span>
+                    <span class="text-sm text-gray-500">· {{ formatDate(task.due_date, { weekday: 'short', month: 'short', day: 'numeric' }) }}</span>
+                  </div>
+
+                  <p class="text-sm text-plant-600 font-medium">{{ task.plant_name }}</p>
                 </div>
 
-                <p class="text-sm text-plant-600 font-medium">{{ task.plant_name }}</p>
-                <p v-if="task.plant_location" class="text-xs text-gray-500">{{ task.plant_location }}</p>
-
-                <p v-if="task.instructions" class="text-sm text-gray-600 mt-2 bg-gray-50 rounded-lg p-3">
-                  {{ task.instructions }}
-                </p>
-              </div>
-
-              <div v-if="task.plant_thumbnail" class="w-24 h-24 rounded-lg overflow-hidden flex-shrink-0">
-                <img :src="`/uploads/plants/${task.plant_thumbnail}`" class="w-full h-full object-cover">
+                <div v-if="task.plant_thumbnail" class="w-24 h-24 rounded-lg overflow-hidden flex-shrink-0">
+                  <img :src="`/uploads/plants/${task.plant_thumbnail}`" class="w-full h-full object-cover">
+                </div>
               </div>
             </div>
           </div>
@@ -185,19 +217,23 @@ const taskIcons = {
         </div>
       </section>
 
-      <!-- Plants reference -->
+      <!-- Plants reference, grouped by location -->
       <section v-if="session.plants && session.plants.length > 0" class="mt-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
           Plants
         </h2>
-        <div class="grid grid-cols-2 gap-3">
-          <div v-for="plant in session.plants" :key="plant.id" class="card overflow-hidden">
-            <div class="aspect-square bg-gray-100">
-              <img v-if="plant.thumbnail" :src="`/uploads/plants/${plant.thumbnail}`" class="w-full h-full object-cover">
-            </div>
-            <div class="p-3">
-              <h3 class="font-medium text-gray-900 truncate">{{ plant.name }}</h3>
-              <p v-if="plant.location" class="text-xs text-gray-500">{{ plant.location }}</p>
+        <div v-for="group in plantsByLocation" :key="group.location" class="mb-5">
+          <h3 class="text-xs font-semibold text-plant-700 uppercase tracking-wide mb-2 px-1">
+            {{ group.location }}
+          </h3>
+          <div class="grid grid-cols-2 gap-3">
+            <div v-for="plant in group.items" :key="plant.id" class="card overflow-hidden">
+              <div class="aspect-square bg-gray-100">
+                <img v-if="plant.thumbnail" :src="`/uploads/plants/${plant.thumbnail}`" class="w-full h-full object-cover">
+              </div>
+              <div class="p-3">
+                <h3 class="font-medium text-gray-900 truncate">{{ plant.name }}</h3>
+              </div>
             </div>
           </div>
         </div>

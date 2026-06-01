@@ -2,6 +2,15 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.14.5] - 2026-05-18
+
+### Fixed
+- **Share URL date range was off by one day** - `new Date('2026-06-03')` parses as UTC midnight; in any timezone west of UTC, `toLocaleDateString` then rendered the previous day. Switched to local-date parsing for both the header range and per-task due dates
+
+### Changed
+- **Share view now groups tasks and plants by location** - Easier for the sitter to find plants in the house by working through one room at a time. Plants without a location land under "Unassigned"
+- **Removed per-task instructions in the share view** - Cleaner list focused on what to do, not how
+
 ## [0.14.4] - 2026-05-18
 
 ### Fixed
