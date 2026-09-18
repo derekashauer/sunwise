@@ -2,7 +2,10 @@
 
 All notable changes to Sunwise are documented in this file.
 
-## [0.14.9] - 2026-09-05
+## [0.14.9] - 2026-09-18
+
+### Changed
+- **Grouping by task type now orders each group by location** - When Today is grouped by task instead of by location, tasks within each type are ordered by room (alphabetically, "No Location" last) so a single type can still be worked through room by room. Previously each type group kept the API's priority/due-date order, which interleaved rooms. Each row now also shows a location badge in this mode, since the room is no longer implied by a group heading
 
 ### Fixed
 - **Fertilize tasks still never appeared after 0.14.3** - 0.14.3 removed the batching gate and made the sibling auto-skip one-directional, but daily reconciliation was still symmetric: it treated any *watering* as having satisfied a pending *fertilize* task. The moment a fertilize task came due, reconciliation saw a recent watering and pushed it out a full fertilize interval — on every load of the Today view. A fertilize task could never stay due long enough to be seen. Reconciliation now only defers a fertilize task when the plant was actually fertilized; water tasks still accept either action, since fertilizing waters the plant too

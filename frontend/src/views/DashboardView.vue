@@ -51,31 +51,47 @@ function getTaskPriority(taskType) {
   return taskTypePriority[taskType] ?? 99
 }
 
+const NO_LOCATION = 'No Location'
+
+function getLocationName(task) {
+  return getPlant(task.plant_id)?.location_name || NO_LOCATION
+}
+
+// Alphabetical by location, with "No Location" always last
+function compareLocationNames(a, b) {
+  if (a === NO_LOCATION) return 1
+  if (b === NO_LOCATION) return -1
+  return a.localeCompare(b)
+}
+
+// Order tasks by the room they're in, so a list can be worked room by room.
+// Ties break on plant name to keep the order stable between renders.
+function compareByLocation(a, b) {
+  const locA = getLocationName(a)
+  const locB = getLocationName(b)
+  if (locA !== locB) return compareLocationNames(locA, locB)
+  return (a.plant_name || '').localeCompare(b.plant_name || '')
+}
+
 // Group pending tasks by location
 const tasksByLocation = computed(() => {
   const groups = {}
   for (const task of pendingTasks.value) {
-    const plant = getPlant(task.plant_id)
-    const locationName = plant?.location_name || 'No Location'
+    const locationName = getLocationName(task)
     if (!groups[locationName]) {
       groups[locationName] = []
     }
     groups[locationName].push(task)
   }
-  // Sort location names, putting "No Location" last
-  const sortedLocations = Object.keys(groups).sort((a, b) => {
-    if (a === 'No Location') return 1
-    if (b === 'No Location') return -1
-    return a.localeCompare(b)
-  })
   // Sort tasks within each location by task type
-  return sortedLocations.map(name => ({
+  return Object.keys(groups).sort(compareLocationNames).map(name => ({
     name,
     tasks: groups[name].sort((a, b) => getTaskPriority(a.task_type) - getTaskPriority(b.task_type))
   }))
 })
 
-// Group pending tasks by task type
+// Group pending tasks by task type. Within each type, order by location so the
+// room-by-room walk still works when grouping by task instead of by location.
 const tasksByType = computed(() => {
   const groups = {}
   for (const task of pendingTasks.value) {
@@ -87,7 +103,11 @@ const tasksByType = computed(() => {
   }
   // Sort task types alphabetically
   const sortedTypes = Object.keys(groups).sort()
-  return sortedTypes.map(name => ({ name, tasks: groups[name], taskType: name.replace(' ', '_') }))
+  return sortedTypes.map(name => ({
+    name,
+    tasks: groups[name].sort(compareByLocation),
+    taskType: name.replace(' ', '_')
+  }))
 })
 
 const taskGroups = computed(() => {
@@ -330,6 +350,7 @@ function isGroupSkipping(groupName) {
                 :key="task.id"
                 :task="task"
                 :plant="getPlant(task.plant_id)"
+                :show-location="groupBy === 'task'"
               />
             </div>
           </div>

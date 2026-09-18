@@ -13,7 +13,10 @@ const props = defineProps({
   task: { type: Object, required: true },
   plant: { type: Object, default: null },
   completed: { type: Boolean, default: false },
-  showRecommendations: { type: Boolean, default: true }
+  showRecommendations: { type: Boolean, default: true },
+  // Show which room the plant is in. Used when the list isn't already grouped
+  // by location, so a location-ordered list can still be read room by room.
+  showLocation: { type: Boolean, default: false }
 })
 
 const tasks = useTasksStore()
@@ -61,6 +64,10 @@ const taskIcons = {
   check_roots: { src: 'https://img.icons8.com/doodle/48/soil.png', alt: 'check roots' },
   pot_up: { src: 'https://img.icons8.com/doodle/48/potted-plant.png', alt: 'pot up' }
 }
+
+const locationLabel = computed(
+  () => props.plant?.location_name || props.task.plant_location || 'No Location'
+)
 
 const daysUntilDue = computed(() => {
   if (!props.task.pulled_forward) return 0
@@ -302,6 +309,13 @@ async function applyScheduleAdjustment() {
             class="px-1.5 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700"
           >
             Batched · due in {{ daysUntilDue }} days
+          </span>
+          <span
+            v-if="showLocation"
+            class="flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded-full bg-sage-100 text-sage-700 flex-shrink-0"
+          >
+            <img src="https://img.icons8.com/doodle/48/place-marker.png" alt="location" class="w-3 h-3">
+            {{ locationLabel }}
           </span>
         </div>
         <div class="flex items-center gap-1">
