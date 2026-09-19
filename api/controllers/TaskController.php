@@ -81,10 +81,13 @@ class TaskController
         // recently watered/fertilized (via care_log), skip the task if it's too soon
         $this->reconcileOverdueTasks($userId, $accessCondition);
 
+        // Location lives in the `locations` table via location_id; the legacy
+        // p.location text column is empty for plants organized after structured
+        // locations were introduced. Fall back to it for unmigrated legacy plants.
         $stmt = db()->query("
             SELECT t.*,
                    p.name as plant_name,
-                   p.location as plant_location,
+                   COALESCE(l.name, p.location) as plant_location,
                    p.species as plant_species,
                    p.light_condition as plant_light_condition,
                    CAST(COALESCE(p.is_propagation, 0) AS INTEGER) as plant_is_propagation,
@@ -97,6 +100,7 @@ class TaskController
                    ELSE NULL END as completed_by_name
             FROM tasks t
             JOIN plants p ON t.plant_id = p.id
+            LEFT JOIN locations l ON p.location_id = l.id
             WHERE {$accessCondition}
               AND t.due_date <= '{$today}'
               AND t.skipped_at IS NULL
@@ -129,10 +133,12 @@ class TaskController
         $accessCondition = $this->getAccessiblePlantCondition($userId);
         $taskTypeCondition = $this->getDisabledTaskTypeCondition($userId);
 
+        // See today() — location comes from `locations` via location_id, with the
+        // legacy p.location text column as a fallback for unmigrated plants.
         $stmt = db()->query("
             SELECT t.*,
                    p.name as plant_name,
-                   p.location as plant_location,
+                   COALESCE(l.name, p.location) as plant_location,
                    p.species as species,
                    p.pot_size as pot_size,
                    p.soil_type as soil_type,
@@ -140,6 +146,7 @@ class TaskController
                    CASE WHEN p.user_id = {$userId} THEN 1 ELSE 0 END as is_owned
             FROM tasks t
             JOIN plants p ON t.plant_id = p.id
+            LEFT JOIN locations l ON p.location_id = l.id
             WHERE {$accessCondition}
               AND t.due_date BETWEEN '{$today}' AND '{$endDate}'
               AND t.completed_at IS NULL
