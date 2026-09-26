@@ -1,0 +1,46 @@
+name: Repair Fertilize Due Dates
+
+# Runs api/scripts/repair_fertilize_dates.php against production over SSH.
+# Defaults to a dry run; set apply=true to write. The script is idempotent, so a
+# repeat run with nothing left to correct is a no-op.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Write the changes (false = dry run preview only)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: production-fertilize-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      REMOTE_PATH: ~/www/dereka328.sg-host.com/public_html
+    steps:
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add server to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Run repair script
+        run: |
+          if [ "${{ github.event.inputs.apply }}" = "true" ]; then
+            FLAG="--apply"
+            echo "Mode: APPLY (writing changes)"
+          else
+            FLAG=""
+            echo "Mode: DRY RUN (no changes written)"
+          fi
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd $REMOTE_PATH && php api/scripts/repair_fertilize_dates.php $FLAG"
