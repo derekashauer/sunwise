@@ -2,6 +2,10 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useApi } from '@/composables/useApi'
 
+// API GET responses the service worker keeps for offline use. They hold the
+// signed-in user's plants and tasks, so they are cleared on logout.
+const API_CACHE_NAME = 'sunwise-api'
+
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
   const token = ref(null)
@@ -17,19 +21,39 @@ export const useAuthStore = defineStore('auth', () => {
 
     if (storedToken && storedUser) {
       token.value = storedToken
-      user.value = JSON.parse(storedUser)
-
-      // Verify token is still valid
       try {
-        const response = await api.get('/auth/me')
-        user.value = response.user
-      } catch (error) {
-        // Token expired or invalid
-        logout()
+        user.value = JSON.parse(storedUser)
+      } catch (e) {
+        user.value = null
       }
+
+      // Check the token in the background so the first screen isn't held up
+      // by the network.
+      refreshUser()
     }
 
     initialized.value = true
+  }
+
+  // Only a real 401 means the token is bad. No signal, a timeout or a server
+  // error keeps the user signed in so the app still opens in a dead spot.
+  async function refreshUser() {
+    try {
+      const response = await api.get('/auth/me', { skipAuthRedirect: true, timeout: 10000 })
+      if (response.user) {
+        user.value = response.user
+        localStorage.setItem('user', JSON.stringify(response.user))
+      }
+    } catch (error) {
+      if (error.status === 401 && token.value) {
+        await logout()
+        const { default: router } = await import('@/router')
+        const current = router.currentRoute.value
+        if (current.meta?.requiresAuth) {
+          router.replace({ name: 'login', query: { redirect: current.fullPath } })
+        }
+      }
+    }
   }
 
   async function register(email, password) {
@@ -67,21 +91,17 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('token')
     localStorage.removeItem('user')
 
-    // Clear PWA caches and unregister service worker to ensure fresh content on next login
+    // Drop cached API data and any queued offline actions so the next person
+    // to sign in on this device doesn't see them. The service worker itself
+    // stays registered so the app keeps working offline.
     try {
-      // Clear all caches
       if ('caches' in window) {
-        const cacheNames = await caches.keys()
-        await Promise.all(cacheNames.map(name => caches.delete(name)))
+        await caches.delete(API_CACHE_NAME)
       }
-
-      // Unregister service workers
-      if ('serviceWorker' in navigator) {
-        const registrations = await navigator.serviceWorker.getRegistrations()
-        await Promise.all(registrations.map(reg => reg.unregister()))
-      }
+      const { clearOutbox } = await import('@/services/outbox')
+      await clearOutbox()
     } catch (e) {
-      console.error('Failed to clear caches:', e)
+      console.error('Failed to clear offline data:', e)
     }
   }
 

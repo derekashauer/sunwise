@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useApi } from '@/composables/useApi'
+import { parseUtc } from '@/utils/dates'
 
 const route = useRoute()
 const router = useRouter()
@@ -57,7 +58,7 @@ async function acceptInvitation() {
 }
 
 function formatDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString()
+  return parseUtc(dateStr)?.toLocaleDateString() || ''
 }
 </script>
 

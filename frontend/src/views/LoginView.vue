@@ -65,7 +65,7 @@ async function handleSubmit() {
         <div class="w-14 h-14 mx-auto mb-4 bg-sage-100 rounded-2xl flex items-center justify-center">
           <img
             src="https://img.icons8.com/doodle/48/new-post.png"
-            alt="email"
+            alt=""
             class="w-8 h-8"
           >
         </div>

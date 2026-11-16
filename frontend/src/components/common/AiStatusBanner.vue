@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { parseUtc } from '@/utils/dates'
 
 const api = useApi()
 const aiStatus = ref(null)
@@ -95,7 +96,8 @@ function getIconColor(status) {
 
 function formatTimeAgo(dateStr) {
   if (!dateStr) return 'never'
-  const date = new Date(dateStr + 'Z') // Assume UTC
+  const date = parseUtc(dateStr)
+  if (!date) return 'never'
   const now = new Date()
   const diff = (now - date) / 1000 // seconds
 

@@ -2,10 +2,22 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
-import { useApi } from '@/composables/useApi'
-import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
 import CareInfoModal from '@/components/plants/CareInfoModal.vue'
 import CheckTaskModal from '@/components/tasks/CheckTaskModal.vue'
+import SkipTaskModal from '@/components/tasks/SkipTaskModal.vue'
+import TaskRecommendations from '@/components/tasks/TaskRecommendations.vue'
+import ImageLightbox from '@/components/common/ImageLightbox.vue'
+import { getTaskIcon, getTaskLabel, getTaskInterval } from '@/constants/taskTypes'
+import {
+  parseUtc,
+  parseLocalDate,
+  daysFromToday,
+  formatShortDate,
+  formatRelativeDays,
+  formatDaysLate,
+  toLocalDateInput,
+  addDays
+} from '@/utils/dates'
 
 const router = useRouter()
 
@@ -19,117 +31,124 @@ const props = defineProps({
   showLocation: { type: Boolean, default: false }
 })
 
+// Lets parents that keep their own task list (like the plant page) stay in
+// sync. The Today list lives in the store and updates itself.
+const emit = defineEmits(['changed', 'removed'])
+
 const tasks = useTasksStore()
-const api = useApi()
+
 const loading = ref(false)
 const expanded = ref(false)
-const loadingRecs = ref(false)
-const recommendations = ref(null)
-const recError = ref(null)
-const showNotesInput = ref(false)
 const notes = ref('')
+const showSnooze = ref(false)
+const snoozeDate = ref('')
+const snoozing = ref(false)
 
-// Modal states
 const showSkipModal = ref(false)
 const showImageModal = ref(false)
 const showCareInfoModal = ref(false)
 const showCheckModal = ref(false)
-const checkInsights = ref([])
-const skipReason = ref('')
-const customSkipReason = ref('')
-const skipping = ref(false)
-const adjustingSchedule = ref(false)
-const scheduleAdjustment = ref(null)
+const savingCheck = ref(false)
 
-const skipReasons = [
-  { value: 'still_moist', label: 'Soil is still moist', icon: '💧' },
-  { value: 'plant_away', label: 'Plant is away/outdoors', icon: '🌳' },
-  { value: 'recently_done', label: 'Already did this recently', icon: '✅' },
-  { value: 'plant_stressed', label: 'Plant seems stressed', icon: '😟' },
-  { value: 'weather', label: 'Weather conditions', icon: '🌧️' },
-  { value: 'other', label: 'Other reason', icon: '📝' }
-]
-
-const emit = defineEmits(['completed', 'skipped'])
-
-const taskIcons = {
-  water: { src: 'https://img.icons8.com/doodle/48/watering-can.png', alt: 'water' },
-  fertilize: { src: 'https://img.icons8.com/doodle/48/nature-care.png', alt: 'fertilize' },
-  trim: { src: 'https://img.icons8.com/doodle/48/cut.png', alt: 'trim' },
-  repot: { src: 'https://img.icons8.com/doodle/48/potted-plant.png', alt: 'repot' },
-  rotate: { src: 'https://img.icons8.com/doodle/48/rotate.png', alt: 'rotate' },
-  mist: { src: 'https://img.icons8.com/doodle/48/splash.png', alt: 'mist' },
-  check: { src: 'https://img.icons8.com/doodle/48/visible--v1.png', alt: 'check' },
-  change_water: { src: 'https://img.icons8.com/doodle/48/water.png', alt: 'change water' },
-  check_roots: { src: 'https://img.icons8.com/doodle/48/soil.png', alt: 'check roots' },
-  pot_up: { src: 'https://img.icons8.com/doodle/48/potted-plant.png', alt: 'pot up' }
-}
+const plantName = computed(() => props.plant?.name || props.task.plant_name || 'Plant')
+const thumbnail = computed(() => props.plant?.thumbnail || props.task.plant_thumbnail)
+const taskLabel = computed(() => getTaskLabel(props.task.task_type))
+const taskIcon = computed(() => getTaskIcon(props.task.task_type))
+const isCheck = computed(() => props.task.task_type === 'check')
+const isDone = computed(() => props.completed || !!props.task.completed_at)
 
 const locationLabel = computed(
   () => props.plant?.location_name || props.task.plant_location || 'No Location'
 )
 
-const daysUntilDue = computed(() => {
-  if (!props.task.pulled_forward) return 0
-  const due = new Date(props.task.due_date + 'T00:00:00')
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  return Math.max(1, Math.ceil((due - now) / 86400000))
+const daysLate = computed(() => {
+  if (isDone.value) return 0
+  if (props.task.days_overdue !== undefined && props.task.days_overdue !== null) {
+    return Number(props.task.days_overdue) || 0
+  }
+  const diff = daysFromToday(parseLocalDate(props.task.due_date))
+  return diff !== null && diff < 0 ? Math.abs(diff) : 0
 })
 
-function getTaskIcon(taskType) {
-  return taskIcons[taskType] || { src: 'https://img.icons8.com/doodle/48/todo-list.png', alt: 'task' }
-}
+// "Every 7 days · last done Nov 8 (4 days ago)"
+const whyText = computed(() => {
+  const parts = []
+  const interval = getTaskInterval(props.task)
+  parts.push(interval ? `Every ${interval} day${interval === 1 ? '' : 's'}` : 'One-time task')
+  const lastDone = parseUtc(props.task.last_done_at)
+  if (lastDone) {
+    parts.push(`last done ${formatShortDate(lastDone)} (${formatRelativeDays(lastDone)})`)
+  } else {
+    parts.push('no record of it being done yet')
+  }
+  const due = parseLocalDate(props.task.due_date)
+  if (due && daysLate.value > 0) {
+    parts.push(`was due ${formatShortDate(due)}`)
+  }
+  return parts.join(' · ')
+})
+
+const minSnoozeDate = computed(() => toLocalDateInput(addDays(new Date(), 1)))
+
+const doneLabel = computed(() => {
+  const past = {
+    water: 'Watered',
+    fertilize: 'Fertilized',
+    mist: 'Misted',
+    rotate: 'Rotated',
+    trim: 'Trimmed',
+    prune: 'Pruned',
+    repot: 'Repotted',
+    pot_up: 'Potted up',
+    change_water: 'Changed water for',
+    check_roots: 'Checked roots on',
+    check: 'Checked'
+  }
+  return past[props.task.task_type] || `Done: ${taskLabel.value.toLowerCase()} for`
+})
 
 function goToPlant() {
-  if (props.plant?.id || props.task.plant_id) {
-    router.push(`/plants/${props.plant?.id || props.task.plant_id}`)
-  }
+  const id = props.plant?.id || props.task.plant_id
+  if (id) router.push(`/plants/${id}`)
 }
 
-async function toggleExpand() {
+function toggleExpand() {
   expanded.value = !expanded.value
-
-  // Fetch recommendations when first expanding
-  if (expanded.value && !recommendations.value && !loadingRecs.value) {
-    await fetchRecommendations()
-  }
-}
-
-async function fetchRecommendations() {
-  loadingRecs.value = true
-  recError.value = null
-
-  try {
-    const response = await api.get(`/tasks/${props.task.id}/recommendations`)
-    recommendations.value = response.recommendations
-  } catch (e) {
-    recError.value = e.message || 'Failed to load recommendations'
-    console.error('Failed to fetch recommendations:', e)
-  } finally {
-    loadingRecs.value = false
-  }
+  if (expanded.value) showSnooze.value = false
 }
 
 function handleCheckboxClick() {
-  if (props.completed) return
-  // For check tasks, show the structured data modal
-  if (props.task.task_type === 'check') {
-    showCheckModal.value = true
-  } else {
-    showNotesInput.value = true
+  if (loading.value) return
+  if (isDone.value) {
+    undoComplete()
+    return
   }
+  if (isCheck.value) {
+    showCheckModal.value = true
+    return
+  }
+  complete()
+}
+
+function nowUtcString() {
+  return new Date().toISOString().slice(0, 19).replace('T', ' ')
 }
 
 async function complete(withNotes = false) {
-  if (loading.value || props.completed) return
+  if (loading.value || isDone.value) return
   loading.value = true
+  const noteText = withNotes && notes.value.trim() ? notes.value.trim() : null
   try {
-    await tasks.completeTask(props.task.id, withNotes ? notes.value : null)
-    window.$toast?.success('Task completed!')
-    showNotesInput.value = false
+    const { task, queued } = await tasks.completeTask(props.task.id, noteText)
     notes.value = ''
-    emit('completed', props.task)
+    expanded.value = false
+    emit('changed', { id: props.task.id, changes: task || { completed_at: nowUtcString() } })
+    const message = queued
+      ? `${doneLabel.value} ${plantName.value}. Saved offline, will sync.`
+      : `${doneLabel.value} ${plantName.value}`
+    window.$toast?.[queued ? 'info' : 'success'](message, {
+      action: { label: 'Undo', onClick: undoComplete }
+    })
   } catch (error) {
     window.$toast?.error(error.message)
   } finally {
@@ -137,509 +156,314 @@ async function complete(withNotes = false) {
   }
 }
 
-function cancelNotes() {
-  showNotesInput.value = false
-  notes.value = ''
+async function undoComplete() {
+  loading.value = true
+  try {
+    const task = await tasks.uncompleteTask(props.task.id)
+    emit('changed', { id: props.task.id, changes: task || { completed_at: null } })
+    window.$toast?.info(`${taskLabel.value} for ${plantName.value} is back on your list`)
+  } catch (error) {
+    window.$toast?.error(error.message || "Couldn't undo that. Try again.")
+  } finally {
+    loading.value = false
+  }
 }
 
 async function handleCheckComplete(checkData) {
-  if (loading.value || props.completed) return
-  loading.value = true
-
-  // Close modal immediately so user can continue with other tasks
-  showCheckModal.value = false
-  emit('completed', props.task)
-  window.$toast?.success('Check completed!')
-
-  // Run the API call in the background (includes AI analysis & care plan updates)
+  if (savingCheck.value) return
+  savingCheck.value = true
   try {
     const result = await tasks.completeCheckTask(props.task.id, checkData)
+    showCheckModal.value = false
+    emit('changed', { id: props.task.id, changes: result.task || { completed_at: nowUtcString() } })
 
-    // Show insights as toast notifications if any came back
-    if (result.insights && result.insights.length > 0) {
-      for (const insight of result.insights) {
-        const plantName = props.task.plant_name || 'Plant'
-        if (insight.type === 'warning') {
-          window.$toast?.error(`${plantName}: ${insight.message}`, { duration: 8000 })
-        } else {
-          window.$toast?.success(`${plantName}: ${insight.message}`, { duration: 6000 })
-        }
+    if (result.queued) {
+      window.$toast?.info(`Check saved offline for ${plantName.value}. It will sync when you're back online.`, {
+        action: { label: 'Undo', onClick: undoComplete }
+      })
+      return
+    }
+
+    window.$toast?.success(`Check saved for ${plantName.value}`, {
+      action: { label: 'Undo', onClick: undoComplete }
+    })
+
+    // Insights stay up longer so there's time to read them.
+    for (const insight of result.insights || []) {
+      const text = `${plantName.value}: ${insight.message}`
+      if (insight.type === 'warning' || insight.type === 'urgent') {
+        window.$toast?.error(text, { duration: 10000 })
+      } else {
+        window.$toast?.info(text, { duration: 8000 })
       }
     }
   } catch (error) {
+    // Keep the form open so nothing that was entered is lost.
     window.$toast?.error(error.message)
   } finally {
-    loading.value = false
+    savingCheck.value = false
   }
 }
 
-function handleCheckModalClose() {
-  showCheckModal.value = false
-  checkInsights.value = []
-  // If insights were shown, emit completed now
-  if (props.task.completed_at || loading.value === false) {
-    emit('completed', props.task)
+function toggleSnooze() {
+  showSnooze.value = !showSnooze.value
+  if (showSnooze.value) {
+    expanded.value = false
+    snoozeDate.value = ''
   }
 }
 
-function openSkipModal() {
-  showSkipModal.value = true
-  skipReason.value = ''
-  customSkipReason.value = ''
-  scheduleAdjustment.value = null
-}
+async function snooze(option) {
+  if (snoozing.value) return
+  const payload = option === 'date' ? { date: snoozeDate.value } : { days: option }
+  if (option === 'date' && !snoozeDate.value) return
 
-function closeSkipModal() {
-  showSkipModal.value = false
-  skipReason.value = ''
-  customSkipReason.value = ''
-  scheduleAdjustment.value = null
-}
-
-function getSkipReasonText() {
-  if (skipReason.value === 'other') {
-    return customSkipReason.value
-  }
-  const reason = skipReasons.find(r => r.value === skipReason.value)
-  return reason ? reason.label : skipReason.value
-}
-
-async function skipWithReason() {
-  // Skip reason is now optional - can skip without selecting a reason
-  if (skipReason.value === 'other' && !customSkipReason.value.trim()) {
-    // If "other" is selected, require custom text
-    return
-  }
-
-  skipping.value = true
+  snoozing.value = true
   try {
-    const reason = skipReason.value ? getSkipReasonText() : null
-    await tasks.skipTask(props.task.id, reason)
-    window.$toast?.success('Task skipped')
-    closeSkipModal()
-    emit('skipped', props.task)
+    const { task, queued } = await tasks.snoozeTask(props.task.id, payload)
+    showSnooze.value = false
+    const newDue = task?.due_date
+      ? parseLocalDate(task.due_date)
+      : option === 'date' ? parseLocalDate(snoozeDate.value) : addDays(new Date(), option)
+    emit('changed', { id: props.task.id, changes: task || { due_date: toLocalDateInput(newDue) } })
+    const when = formatRelativeDays(newDue)
+    const message = `${taskLabel.value} for ${plantName.value} moved to ${formatShortDate(newDue)} (${when})`
+    window.$toast?.[queued ? 'info' : 'success'](queued ? `${message}. Saved offline, will sync.` : message)
   } catch (error) {
     window.$toast?.error(error.message)
   } finally {
-    skipping.value = false
+    snoozing.value = false
   }
 }
 
-async function getAIScheduleAdjustment() {
-  if (!skipReason.value) return
-
-  adjustingSchedule.value = true
-  try {
-    const response = await api.post(`/tasks/${props.task.id}/adjust-schedule`, {
-      reason: getSkipReasonText()
-    })
-    scheduleAdjustment.value = response
-  } catch (error) {
-    window.$toast?.error(error.message || 'Could not get schedule suggestion')
-  } finally {
-    adjustingSchedule.value = false
-  }
-}
-
-async function applyScheduleAdjustment() {
-  if (!scheduleAdjustment.value) return
-
-  skipping.value = true
-  try {
-    await api.post(`/tasks/${props.task.id}/apply-adjustment`, {
-      reason: getSkipReasonText(),
-      adjustment: scheduleAdjustment.value.adjustment
-    })
-    // Remove task from list since it was adjusted
-    await tasks.fetchTodayTasks()
-    window.$toast?.success('Schedule updated!')
-    closeSkipModal()
-    emit('skipped', props.task)
-  } catch (error) {
-    window.$toast?.error(error.message)
-  } finally {
-    skipping.value = false
-  }
+function handleSkipped({ task }) {
+  emit('removed', task.id)
 }
 </script>
 
 <template>
-  <div class="bg-cream-50 rounded-2xl border-2 border-sage-100" :class="{ 'opacity-60': completed }">
+  <div class="bg-cream-50 rounded-2xl border-2 border-sage-100" :class="{ 'opacity-70': isDone }">
     <!-- Main row: checkbox, thumbnail, task info -->
-    <div class="flex items-center gap-3 p-3">
-      <!-- Checkbox -->
+    <div class="flex items-center gap-2 p-3 pb-2">
+      <!-- Checkbox: 44px tap area around a 28px circle -->
       <button
+        type="button"
         @click="handleCheckboxClick"
-        :disabled="loading || completed"
-        class="task-checkbox flex-shrink-0"
-        :class="{ 'checked': completed }"
+        :disabled="loading"
+        class="w-11 h-11 -ml-1 flex items-center justify-center flex-shrink-0 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-sage-600"
+        :aria-label="isDone
+          ? `Mark ${taskLabel.toLowerCase()} for ${plantName} as not done`
+          : isCheck
+            ? `Check ${plantName}`
+            : `Mark ${taskLabel.toLowerCase()} for ${plantName} as done`"
+        :aria-pressed="isDone"
       >
-        <svg v-if="completed" class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-        </svg>
-        <div v-else-if="loading" class="w-4 h-4 border-2 border-sage-500 border-t-transparent rounded-full animate-spin"></div>
+        <span class="task-checkbox" :class="{ 'checked': isDone }">
+          <svg v-if="isDone && !loading" class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+          </svg>
+          <span v-else-if="loading" class="w-4 h-4 border-2 border-sage-600 border-t-transparent rounded-full animate-spin" aria-hidden="true"></span>
+        </span>
       </button>
 
-      <!-- Plant thumbnail (clickable to view larger) -->
+      <!-- Plant thumbnail (tap to view larger) -->
       <button
-        v-if="plant?.thumbnail || task.plant_thumbnail"
+        v-if="thumbnail"
+        type="button"
         @click="showImageModal = true"
-        class="w-24 h-24 rounded-xl overflow-hidden flex-shrink-0 border-2 border-sage-200 hover:border-sage-400 transition-colors cursor-pointer"
+        class="w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden flex-shrink-0 border-2 border-sage-200 hover:border-sage-400 transition-colors"
+        :aria-label="`View larger photo of ${plantName}`"
       >
-        <img :src="`/uploads/plants/${plant?.thumbnail || task.plant_thumbnail}`" :alt="plant?.name || task.plant_name" class="w-full h-full object-cover">
+        <img :src="`/uploads/plants/${thumbnail}`" :alt="plantName" class="w-full h-full object-cover">
       </button>
-      <div v-else class="w-24 h-24 rounded-xl bg-cream-200 flex items-center justify-center flex-shrink-0">
-        <img :src="getTaskIcon(task.task_type).src" :alt="getTaskIcon(task.task_type).alt" class="w-10 h-10">
+      <div v-else class="w-20 h-20 sm:w-24 sm:h-24 rounded-xl bg-cream-200 flex items-center justify-center flex-shrink-0">
+        <img :src="taskIcon" alt="" class="w-10 h-10">
       </div>
 
       <!-- Task info -->
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2">
-          <img :src="getTaskIcon(task.task_type).src" :alt="getTaskIcon(task.task_type).alt" class="w-5 h-5">
-          <span class="font-semibold text-charcoal-600 capitalize text-sm">{{ task.task_type.replace('_', ' ') }}</span>
+      <div class="flex-1 min-w-0 pl-1">
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <img :src="taskIcon" alt="" class="w-5 h-5">
+          <span class="font-semibold text-charcoal-600 text-sm">{{ taskLabel }}</span>
+          <span
+            v-if="daysLate > 0"
+            class="px-1.5 py-0.5 text-xs font-semibold rounded-full bg-red-100 text-red-800"
+          >
+            {{ formatDaysLate(daysLate) }}
+          </span>
           <span
             v-if="task.priority === 'high' || task.priority === 'urgent'"
             class="px-1.5 py-0.5 text-xs font-medium rounded-full"
-            :class="task.priority === 'urgent' ? 'bg-terracotta-100 text-terracotta-700' : 'bg-sunny-100 text-sunny-700'"
+            :class="task.priority === 'urgent' ? 'bg-terracotta-100 text-terracotta-800' : 'bg-sunny-100 text-sunny-900'"
           >
             {{ task.priority }}
           </span>
           <span
-            v-if="task.pulled_forward"
-            class="px-1.5 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700"
-          >
-            Batched · due in {{ daysUntilDue }} days
-          </span>
-          <span
             v-if="showLocation"
-            class="flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded-full bg-sage-100 text-sage-700 flex-shrink-0"
+            class="flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded-full bg-sage-100 text-sage-800 flex-shrink-0"
           >
-            <img src="https://img.icons8.com/doodle/48/place-marker.png" alt="location" class="w-3 h-3">
+            <img src="https://img.icons8.com/doodle/48/place-marker.png" alt="" class="w-3 h-3">
             {{ locationLabel }}
           </span>
         </div>
         <div class="flex items-center gap-1">
           <button
+            type="button"
             @click="goToPlant"
-            class="text-sm text-charcoal-400 truncate hover:text-sage-600 hover:underline transition-colors text-left"
+            class="text-sm text-charcoal-500 truncate hover:text-sage-700 hover:underline transition-colors text-left py-1"
           >
-            {{ plant?.name || task.plant_name }}
+            {{ plantName }}
           </button>
           <button
+            type="button"
             @click.stop="showCareInfoModal = true"
-            class="p-1 text-charcoal-300 hover:text-plant-600 transition-colors flex-shrink-0"
-            title="View care guide"
+            class="p-2 -my-1 text-charcoal-400 hover:text-plant-700 transition-colors flex-shrink-0 rounded-lg"
+            :aria-label="`Care guide for ${plantName}`"
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </button>
         </div>
-        <p v-if="task.completed_by_name" class="text-xs text-charcoal-400">
+        <p v-if="task.completed_by_name" class="text-xs text-charcoal-500">
           Completed by {{ task.completed_by_name }}
         </p>
+        <p v-if="task._outboxId" class="text-xs text-sunny-900">Waiting to sync</p>
       </div>
+    </div>
 
-      <!-- Details button -->
+    <!-- Quick actions: snooze, skip, details -->
+    <div v-if="!isDone" class="flex items-center border-t border-cream-200 text-sm">
       <button
-        v-if="showRecommendations && !completed"
-        @click="toggleExpand"
-        class="p-2 text-charcoal-400 hover:text-sage-600 transition-colors flex-shrink-0"
-        :class="{ 'text-sage-600': expanded }"
+        type="button"
+        @click="toggleSnooze"
+        class="flex-1 flex items-center justify-center gap-1.5 py-2.5 min-h-[44px] text-charcoal-500 hover:text-sage-700 hover:bg-cream-100 font-semibold rounded-bl-2xl"
+        :class="{ 'text-sage-700 bg-cream-100': showSnooze }"
+        :aria-expanded="showSnooze"
+        :aria-controls="`snooze-${task.id}`"
       >
-        <svg class="w-5 h-5 transition-transform" :class="{ 'rotate-180': expanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        Snooze
+      </button>
+      <button
+        type="button"
+        @click="showSkipModal = true"
+        class="flex-1 flex items-center justify-center gap-1.5 py-2.5 min-h-[44px] text-charcoal-500 hover:text-terracotta-700 hover:bg-cream-100 font-semibold border-l border-cream-200"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+        </svg>
+        Skip
+      </button>
+      <button
+        v-if="showRecommendations"
+        type="button"
+        @click="toggleExpand"
+        class="flex-1 flex items-center justify-center gap-1.5 py-2.5 min-h-[44px] text-charcoal-500 hover:text-sage-700 hover:bg-cream-100 font-semibold border-l border-cream-200 rounded-br-2xl"
+        :class="{ 'text-sage-700 bg-cream-100': expanded }"
+        :aria-expanded="expanded"
+        :aria-controls="`details-${task.id}`"
+      >
+        Details
+        <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': expanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
         </svg>
       </button>
     </div>
 
-    <!-- Notes input for completing task -->
-    <div v-if="showNotesInput" class="px-3 pb-3">
+    <!-- Snooze options -->
+    <div v-if="showSnooze && !isDone" :id="`snooze-${task.id}`" class="px-3 pb-3 pt-1">
+      <p class="text-sm text-charcoal-600 mb-2">Move this task to:</p>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" @click="snooze(1)" :disabled="snoozing" class="toggle-btn min-h-[44px]">Tomorrow</button>
+        <button type="button" @click="snooze(3)" :disabled="snoozing" class="toggle-btn min-h-[44px]">In 3 days</button>
+        <div class="flex items-center gap-2 flex-1 min-w-[200px]">
+          <label :for="`snooze-date-${task.id}`" class="sr-only">Pick a day</label>
+          <input
+            :id="`snooze-date-${task.id}`"
+            v-model="snoozeDate"
+            type="date"
+            :min="minSnoozeDate"
+            class="input py-2 text-sm flex-1"
+          >
+          <button
+            type="button"
+            @click="snooze('date')"
+            :disabled="snoozing || !snoozeDate"
+            class="btn-primary py-2 px-4 text-sm"
+          >
+            Move
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Details: why it's scheduled, a note, and care tips -->
+    <div v-if="expanded && !isDone" :id="`details-${task.id}`" class="px-3 pb-3 pt-2 space-y-3">
+      <p class="text-sm text-charcoal-600">
+        <span class="font-semibold">Why now:</span> {{ whyText }}
+      </p>
+      <p v-if="task.instructions" class="text-sm text-charcoal-600">
+        <span class="font-semibold">How:</span> {{ task.instructions }}
+      </p>
+
       <div class="bg-sage-50 rounded-xl p-3 border border-sage-200">
-        <p class="text-sm text-charcoal-600 mb-2">Add a note (optional)</p>
+        <label :for="`note-${task.id}`" class="text-sm text-charcoal-600 mb-2 block">Add a note and mark done (optional)</label>
         <textarea
+          :id="`note-${task.id}`"
           v-model="notes"
           rows="2"
           class="input text-sm resize-none mb-2"
-          placeholder="e.g., Used 1 cup of water..."
+          placeholder="e.g., Used 1 cup of water"
         ></textarea>
-        <div class="flex gap-2">
-          <button
-            @click="cancelNotes"
-            class="btn-secondary text-xs py-1.5 px-3 flex-1"
-          >
-            Cancel
-          </button>
-          <button
-            @click="complete(true)"
-            :disabled="loading"
-            class="btn-primary text-xs py-1.5 px-3 flex-1"
-          >
-            <span v-if="loading" class="flex items-center justify-center gap-1">
-              <div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-            </span>
-            <span v-else>Complete</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Expanded details section -->
-    <div v-if="expanded && !showNotesInput" class="px-3 pb-3">
-      <!-- Action buttons -->
-      <div class="flex items-center gap-3 mb-3 pb-3 border-b border-cream-200">
         <button
-          @click="openSkipModal"
-          class="text-xs text-charcoal-400 hover:text-terracotta-500 font-semibold flex items-center gap-1 transition-colors"
+          type="button"
+          @click="isCheck ? (showCheckModal = true) : complete(true)"
+          :disabled="loading || (!isCheck && !notes.trim())"
+          class="btn-primary text-sm py-2 px-4 w-full"
         >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-          </svg>
-          Skip task
+          {{ isCheck ? 'Open check form' : 'Save note and mark done' }}
         </button>
       </div>
 
-      <!-- Loading state -->
-      <div v-if="loadingRecs" class="bg-plant-50 rounded-xl p-4 border border-plant-100">
-        <div class="flex items-center gap-3">
-          <div class="w-5 h-5 border-2 border-plant-500 border-t-transparent rounded-full animate-spin"></div>
-          <span class="text-sm text-plant-700">Getting personalized care tips...</span>
-        </div>
-      </div>
-
-      <!-- Error state -->
-      <div v-else-if="recError" class="bg-red-50 rounded-xl p-4 border border-red-100">
-        <p class="text-sm text-red-700">{{ recError }}</p>
-        <button @click="fetchRecommendations" class="mt-2 text-xs text-red-600 underline">Try again</button>
-      </div>
-
-      <!-- Recommendations -->
-      <div v-else-if="recommendations" class="bg-plant-50 rounded-xl p-4 border border-plant-100 space-y-3">
-        <!-- AI badge -->
-        <div class="flex items-center gap-2 text-xs text-plant-600">
-          <svg v-if="recommendations.source === 'ai'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
-          <span>{{ recommendations.source === 'ai' ? 'AI-personalized for ' + (plant?.name || task.plant_name) : 'Care tips' }}</span>
-        </div>
-
-        <!-- Summary -->
-        <p class="font-medium text-gray-800">{{ recommendations.summary }}</p>
-
-        <!-- Amount/Timing -->
-        <div v-if="recommendations.amount || recommendations.timing" class="flex flex-wrap gap-2 text-xs">
-          <span v-if="recommendations.amount" class="bg-white px-2 py-1 rounded-lg border border-plant-200">
-            {{ recommendations.amount }}
-          </span>
-          <span v-if="recommendations.timing" class="bg-white px-2 py-1 rounded-lg border border-plant-200">
-            {{ recommendations.timing }}
-          </span>
-        </div>
-
-        <!-- Steps -->
-        <div v-if="recommendations.steps?.length" class="space-y-2">
-          <p class="text-xs font-medium text-gray-600 uppercase tracking-wide">Steps</p>
-          <ol class="space-y-1.5 text-sm text-gray-700">
-            <li v-for="(step, index) in recommendations.steps" :key="index" class="flex gap-2">
-              <span class="flex-shrink-0 w-5 h-5 bg-plant-200 text-plant-800 rounded-full text-xs flex items-center justify-center font-medium">{{ index + 1 }}</span>
-              <span>{{ step }}</span>
-            </li>
-          </ol>
-        </div>
-
-        <!-- Warnings -->
-        <div v-if="recommendations.warnings?.length" class="bg-yellow-50 rounded-lg p-3 border border-yellow-200">
-          <p class="text-xs font-medium text-yellow-800 mb-1">Watch out</p>
-          <ul class="space-y-1 text-sm text-yellow-700">
-            <li v-for="(warning, index) in recommendations.warnings" :key="index">{{ warning }}</li>
-          </ul>
-        </div>
-
-        <!-- Tips -->
-        <div v-if="recommendations.tips?.length" class="text-sm text-gray-600">
-          <p class="text-xs font-medium text-gray-500 mb-1">Tips</p>
-          <ul class="space-y-1">
-            <li v-for="(tip, index) in recommendations.tips" :key="index">{{ tip }}</li>
-          </ul>
-        </div>
-      </div>
+      <TaskRecommendations :task-id="task.id" :plant-name="plantName" />
     </div>
 
-    <!-- Loading overlay for AI recommendations -->
-    <LoadingOverlay :visible="loadingRecs" :message="`Getting tips for ${plant?.name || task.plant_name}...`" />
+    <!-- Dialogs -->
+    <SkipTaskModal
+      :task="task"
+      :plant-name="plantName"
+      :visible="showSkipModal"
+      @close="showSkipModal = false"
+      @skipped="handleSkipped"
+    />
 
-    <!-- Skip Modal -->
-    <Teleport to="body">
-      <div v-if="showSkipModal" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-        <!-- Backdrop -->
-        <div class="absolute inset-0 bg-black/50" @click="closeSkipModal"></div>
+    <ImageLightbox
+      :visible="showImageModal"
+      :src="thumbnail ? `/uploads/plants/${thumbnail}` : ''"
+      :alt="`Photo of ${plantName}`"
+      :caption="plantName"
+      @close="showImageModal = false"
+    />
 
-        <!-- Modal content -->
-        <div class="relative bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[85vh] overflow-y-auto">
-          <div class="p-4 border-b sticky top-0 bg-white rounded-t-2xl">
-            <div class="flex items-center justify-between">
-              <h3 class="font-semibold text-gray-900">Skip Task</h3>
-              <button @click="closeSkipModal" class="p-1 text-gray-400 hover:text-gray-600">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <p class="text-sm text-gray-500 mt-1 flex items-center gap-1">
-              <img :src="getTaskIcon(task.task_type).src" :alt="getTaskIcon(task.task_type).alt" class="w-4 h-4 inline">
-              <span class="capitalize">{{ task.task_type.replace('_', ' ') }}</span> - {{ plant?.name || task.plant_name }}
-            </p>
-          </div>
-
-          <div class="p-4 space-y-4">
-            <!-- Reason selection -->
-            <div>
-              <p class="text-sm font-medium text-gray-700 mb-2">Why are you skipping?</p>
-              <div class="space-y-2">
-                <label
-                  v-for="reason in skipReasons"
-                  :key="reason.value"
-                  class="flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all"
-                  :class="skipReason === reason.value
-                    ? 'border-plant-500 bg-plant-50'
-                    : 'border-gray-200 hover:border-gray-300'"
-                >
-                  <input
-                    type="radio"
-                    v-model="skipReason"
-                    :value="reason.value"
-                    class="sr-only"
-                  >
-                  <span class="text-lg">{{ reason.icon }}</span>
-                  <span class="text-sm text-gray-700">{{ reason.label }}</span>
-                </label>
-              </div>
-            </div>
-
-            <!-- Custom reason input -->
-            <div v-if="skipReason === 'other'">
-              <textarea
-                v-model="customSkipReason"
-                rows="2"
-                class="input text-sm"
-                placeholder="Describe why you're skipping..."
-              ></textarea>
-            </div>
-
-            <!-- AI Schedule Adjustment -->
-            <div v-if="skipReason && !scheduleAdjustment" class="pt-2 border-t">
-              <button
-                @click="getAIScheduleAdjustment"
-                :disabled="adjustingSchedule || (skipReason === 'other' && !customSkipReason.trim())"
-                class="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl border-2 border-dashed border-plant-300 text-plant-600 hover:bg-plant-50 transition-colors disabled:opacity-50"
-              >
-                <svg v-if="adjustingSchedule" class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-                <span class="text-sm font-medium">
-                  {{ adjustingSchedule ? 'Analyzing...' : 'Ask AI to adjust schedule' }}
-                </span>
-              </button>
-              <p class="text-xs text-gray-500 text-center mt-2">
-                AI will suggest a new schedule based on your feedback
-              </p>
-            </div>
-
-            <!-- AI Suggestion -->
-            <div v-if="scheduleAdjustment" class="bg-plant-50 rounded-xl p-4 border border-plant-200">
-              <div class="flex items-start gap-3">
-                <div class="w-8 h-8 bg-plant-200 rounded-full flex items-center justify-center flex-shrink-0">
-                  <svg class="w-4 h-4 text-plant-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                  </svg>
-                </div>
-                <div class="flex-1">
-                  <p class="font-medium text-plant-800 text-sm">AI Suggestion</p>
-                  <p class="text-sm text-plant-700 mt-1">{{ scheduleAdjustment.suggestion }}</p>
-                  <p v-if="scheduleAdjustment.new_interval" class="text-xs text-plant-600 mt-2">
-                    New schedule: Every {{ scheduleAdjustment.new_interval }} days
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <!-- Actions -->
-            <div class="flex gap-3 pt-2">
-              <button
-                @click="skipWithReason"
-                :disabled="skipping || (skipReason === 'other' && !customSkipReason.trim())"
-                class="flex-1 btn-secondary"
-              >
-                <span v-if="skipping" class="flex items-center justify-center gap-2">
-                  <div class="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-                </span>
-                <span v-else>Skip{{ skipReason ? '' : ' Without Reason' }}</span>
-              </button>
-              <button
-                v-if="scheduleAdjustment"
-                @click="applyScheduleAdjustment"
-                :disabled="skipping"
-                class="flex-1 btn-primary"
-              >
-                <span v-if="skipping" class="flex items-center justify-center gap-2">
-                  <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                </span>
-                <span v-else>Skip & Update Schedule</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Image lightbox modal -->
-    <Teleport to="body">
-      <div
-        v-if="showImageModal"
-        class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
-        @click.self="showImageModal = false"
-      >
-        <div class="relative max-w-lg w-full">
-          <button
-            @click="showImageModal = false"
-            class="absolute -top-12 right-0 text-white/80 hover:text-white p-2"
-          >
-            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          <img
-            :src="`/uploads/plants/${plant?.thumbnail || task.plant_thumbnail}`"
-            :alt="plant?.name || task.plant_name"
-            class="w-full rounded-2xl shadow-2xl"
-          >
-          <p class="text-white text-center mt-3 font-medium">{{ plant?.name || task.plant_name }}</p>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Care Info Modal -->
     <CareInfoModal
       :plant-id="plant?.id || task.plant_id"
-      :plant-name="plant?.name || task.plant_name"
+      :plant-name="plantName"
       :visible="showCareInfoModal"
       @close="showCareInfoModal = false"
     />
 
-    <!-- Check Task Modal -->
     <CheckTaskModal
       :task="task"
-      :plant-name="plant?.name || task.plant_name"
+      :plant-name="plantName"
       :plant-species="plant?.species || task.plant_species"
       :plant-light-condition="plant?.light_condition || task.plant_light_condition"
       :is-water-propagation="(Number(plant?.is_propagation) === 1 || Number(task.plant_is_propagation) === 1) && (plant?.soil_type === 'water' || task.plant_soil_type === 'water')"
       :visible="showCheckModal"
-      :insights="checkInsights"
-      @close="handleCheckModalClose"
+      :saving="savingCheck"
+      @close="showCheckModal = false"
       @complete="handleCheckComplete"
     />
   </div>
