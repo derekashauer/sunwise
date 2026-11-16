@@ -36,13 +36,19 @@
     transform: scale(0.97);
   }
 
+  /* sage-600 keeps white text above 4.5:1 contrast */
   .btn-primary {
-    @apply btn bg-sage-500 text-white shadow-sage;
-    border-color: #6BA36C;
+    @apply btn bg-sage-600 text-white shadow-sage;
+    border-color: #356836;
   }
 
   .btn-primary:hover {
-    @apply bg-sage-600 shadow-sage-lg;
+    @apply bg-sage-700 shadow-sage-lg;
+  }
+
+  .btn:focus-visible {
+    outline: 3px solid #3F7A41;
+    outline-offset: 2px;
   }
 
   .btn-secondary {
@@ -64,12 +70,12 @@
   }
 
   .btn-terracotta {
-    @apply btn bg-terracotta-500 text-white shadow-warm;
-    border-color: #D15A3C;
+    @apply btn bg-terracotta-600 text-white shadow-warm;
+    border-color: #8F3B28;
   }
 
   .btn-terracotta:hover {
-    @apply bg-terracotta-600 shadow-warm-lg;
+    @apply bg-terracotta-700 shadow-warm-lg;
   }
 
   /* === INPUTS === */
@@ -116,7 +122,9 @@
 
   /* === PAGE LAYOUT === */
   .page-container {
-    @apply min-h-screen pb-24 px-4 pt-4;
+    @apply min-h-screen px-4 pt-4;
+    /* Clear the bottom nav (4rem tall) plus the iPhone home bar. */
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
   }
 
   .page-title {
@@ -278,17 +286,19 @@
     text-decoration: line-through;
   }
 
+  /* The visible circle. TaskItem wraps it in a 44px button for an easy tap. */
   .task-checkbox {
-    @apply w-6 h-6 rounded-full border-2 border-sage-400 flex items-center justify-center
+    @apply w-7 h-7 rounded-full border-2 border-sage-600 flex items-center justify-center
            cursor-pointer transition-all duration-200;
   }
 
-  .task-checkbox:hover {
+  button:hover > .task-checkbox {
     @apply bg-sage-100;
   }
 
-  .task-checkbox.checked {
-    @apply bg-sage-500 border-sage-500;
+  .task-checkbox.checked,
+  button:hover > .task-checkbox.checked {
+    @apply bg-sage-600 border-sage-600;
   }
 
   /* === FORM ELEMENTS === */
@@ -416,6 +426,53 @@
 
 .page-leave-to {
   opacity: 0;
+}
+
+/* === REDUCED MOTION === */
+/* Turn off swaying cards, bouncing icons and slide-ins for people who ask
+   their device for less motion. Spinners keep turning so loading still shows. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+
+  .plant-card:hover,
+  .action-icon:hover,
+  .success-pop,
+  .bottom-nav-item.active .nav-icon,
+  .loading-watering-can,
+  .loading-dots span,
+  .animate-bounce,
+  .animate-pulse,
+  .animate-sway,
+  .animate-wiggle,
+  .animate-pop,
+  .animate-bounce-subtle,
+  .animate-slide-up,
+  .animate-water-tip,
+  .animate-pulse-warm,
+  .modal-content,
+  .modal-bottom,
+  .confetti-piece {
+    animation: none !important;
+  }
+
+  .card:hover,
+  .btn:hover,
+  .btn:active {
+    transform: none;
+  }
+
+  .page-enter-active,
+  .page-leave-active {
+    transition: none !important;
+  }
+
+  .page-enter-from {
+    transform: none;
+  }
 }
 
 /* === DOODLE UNDERLINE FOR SPECIAL TEXT === */

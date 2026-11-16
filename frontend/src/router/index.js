@@ -115,6 +115,12 @@ const routes = [
     name: 'accept-invite',
     component: () => import('@/views/InviteAcceptView.vue'),
     meta: { requiresAuth: false }
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: () => import('@/views/NotFoundView.vue'),
+    meta: { requiresAuth: false, isGuest: true }
   }
 ]
 

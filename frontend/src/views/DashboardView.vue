@@ -5,6 +5,7 @@ import { useTasksStore } from '@/stores/tasks'
 import { usePlantsStore } from '@/stores/plants'
 import TaskItem from '@/components/tasks/TaskItem.vue'
 import AiStatusBanner from '@/components/common/AiStatusBanner.vue'
+import InstallHint from '@/components/common/InstallHint.vue'
 import { getTaskIcon, getTaskLabel, getTaskOrder } from '@/constants/taskTypes'
 import { todayLocal } from '@/utils/dates'
 
@@ -220,6 +221,8 @@ async function retry() {
         </p>
       </div>
     </header>
+
+    <InstallHint />
 
     <!-- Loading state (first load only) -->
     <div v-if="showLoading" class="flex flex-col items-center justify-center py-12" role="status">

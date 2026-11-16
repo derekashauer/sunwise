@@ -23,7 +23,7 @@ function navigate(name) {
 </script>
 
 <template>
-  <nav class="bottom-nav">
+  <nav class="bottom-nav" aria-label="Main">
     <div class="flex items-center justify-around h-16 max-w-lg mx-auto">
       <button
         v-for="item in navItems"
@@ -31,12 +31,14 @@ function navigate(name) {
         @click="navigate(item.name)"
         class="bottom-nav-item relative"
         :class="{ 'active': currentRoute === item.name }"
+        :aria-current="currentRoute === item.name ? 'page' : undefined"
+        :aria-label="item.icon === 'plus' ? 'Add a plant' : undefined"
       >
         <!-- Plus icon (special add button) -->
         <img
           v-if="item.icon === 'plus'"
           :src="item.doodle"
-          :alt="item.label"
+          alt=""
           class="w-10 h-10 -mt-2 transition-transform hover:scale-110"
         >
 
@@ -44,7 +46,7 @@ function navigate(name) {
         <img
           v-else
           :src="item.doodle"
-          :alt="item.label"
+          alt=""
           class="w-7 h-7 nav-icon transition-transform"
           :class="{ 'scale-110': currentRoute === item.name }"
         >
@@ -54,9 +56,9 @@ function navigate(name) {
         <!-- Badge for tasks -->
         <span
           v-if="item.name === 'dashboard' && tasks.todayCount > 0"
-          class="absolute -top-0.5 ml-5 bg-terracotta-500 text-white text-xs w-5 h-5 flex items-center justify-center rounded-full font-bold shadow-warm"
+          class="absolute -top-0.5 ml-5 bg-terracotta-600 text-white text-xs w-5 h-5 flex items-center justify-center rounded-full font-bold shadow-warm"
         >
-          {{ tasks.todayCount > 9 ? '9+' : tasks.todayCount }}
+          <span class="sr-only">, </span>{{ tasks.todayCount > 9 ? '9+' : tasks.todayCount }}<span class="sr-only"> tasks due</span>
         </span>
       </button>
     </div>
