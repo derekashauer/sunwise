@@ -37,16 +37,17 @@ export const usePlantsStore = defineStore('plants', () => {
 
   async function updatePlant(id, data) {
     const response = await api.put(`/plants/${id}`, data)
-    const index = plants.value.findIndex(p => p.id === id)
+    // Route params are strings and API ids are numbers, so compare as numbers.
+    const index = plants.value.findIndex(p => Number(p.id) === Number(id))
     if (index !== -1) {
-      plants.value[index] = response.plant
+      plants.value[index] = { ...plants.value[index], ...response.plant }
     }
     return response.plant
   }
 
   async function deletePlant(id) {
     await api.delete(`/plants/${id}`)
-    plants.value = plants.value.filter(p => p.id !== id)
+    plants.value = plants.value.filter(p => Number(p.id) !== Number(id))
   }
 
   async function uploadPhoto(plantId, formData) {
@@ -65,7 +66,7 @@ export const usePlantsStore = defineStore('plants', () => {
   }
 
   function getPlantById(id) {
-    return plants.value.find(p => p.id === parseInt(id))
+    return plants.value.find(p => Number(p.id) === Number(id))
   }
 
   return {
