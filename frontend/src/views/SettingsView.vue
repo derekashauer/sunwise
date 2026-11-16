@@ -549,7 +549,7 @@ const galleryUrl = computed(() => {
           <div class="flex items-center justify-between mb-2">
             <div>
               <p class="font-medium text-charcoal-700">OpenAI API Key</p>
-              <p class="text-xs text-charcoal-400">For GPT-4o models</p>
+              <p class="text-xs text-charcoal-400">For OpenAI models</p>
             </div>
             <span
               v-if="aiSettings?.has_openai_key"
@@ -610,7 +610,7 @@ const galleryUrl = computed(() => {
           <div class="flex items-center justify-between mb-2">
             <div>
               <p class="font-medium text-charcoal-700">Claude API Key</p>
-              <p class="text-xs text-charcoal-400">For Claude Opus 4.5</p>
+              <p class="text-xs text-charcoal-400">For Claude models</p>
             </div>
             <span
               v-if="aiSettings?.has_claude_key"

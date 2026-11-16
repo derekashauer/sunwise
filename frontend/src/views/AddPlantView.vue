@@ -357,7 +357,7 @@ function skipCarePlanUpdate() {
 <template>
   <div class="page-container">
     <header class="flex items-center gap-4 mb-6">
-      <button @click="router.back()" class="btn-ghost p-2 -ml-2">
+      <button type="button" @click="router.back()" class="btn-ghost p-2 -ml-2" aria-label="Go back">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
         </svg>

@@ -213,13 +213,13 @@ function openLightbox(src, alt) {
                   <img :src="`/uploads/plants/${task.plant_thumbnail}`" :alt="task.plant_name" class="w-full h-full object-cover">
                 </button>
                 <div v-else class="w-20 h-20 rounded-xl bg-cream-200 flex items-center justify-center flex-shrink-0">
-                  <img :src="getTaskIcon(task.task_type)" :alt="task.task_type" class="w-10 h-10">
+                  <img :src="getTaskIcon(task.task_type)" alt="" class="w-10 h-10">
                 </div>
 
                 <!-- Task info -->
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
-                    <img :src="getTaskIcon(task.task_type)" :alt="task.task_type" class="w-5 h-5">
+                    <img :src="getTaskIcon(task.task_type)" alt="" class="w-5 h-5">
                     <span class="font-semibold text-charcoal-600 capitalize text-sm">{{ task.task_type.replace('_', ' ') }}</span>
                     <span
                       v-if="task.priority === 'urgent' || task.priority === 'high'"
@@ -264,7 +264,7 @@ function openLightbox(src, alt) {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
               </svg>
             </div>
-            <img :src="getTaskIcon(task.task_type)" :alt="task.task_type" class="w-5 h-5">
+            <img :src="getTaskIcon(task.task_type)" alt="" class="w-5 h-5">
             <span class="font-semibold text-charcoal-600 capitalize text-sm">{{ task.task_type.replace('_', ' ') }}</span>
             <span class="text-sm text-charcoal-400">· {{ task.plant_name }}</span>
           </div>
