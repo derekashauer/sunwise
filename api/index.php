@@ -319,8 +319,16 @@ try {
     $controller = new $controllerName();
     $response = $controller->$methodName($params, $body, $userId);
 
-    http_response_code($response['status'] ?? 200);
-    echo json_encode($response['data'] ?? $response);
+    // Controllers signal errors with ['status' => 404, 'data' => [...]].
+    // Some successful payloads have their own 'status' field ("ok"), so only
+    // an integer status paired with 'data' is treated as the HTTP code.
+    if (isset($response['data']) && is_int($response['status'] ?? null)) {
+        http_response_code($response['status']);
+        echo json_encode($response['data']);
+    } else {
+        http_response_code(200);
+        echo json_encode($response);
+    }
 } catch (Throwable $e) {
     error_log('Unhandled API error on ' . $method . ' ' . $uri . ': ' . $e->getMessage());
     http_response_code(500);

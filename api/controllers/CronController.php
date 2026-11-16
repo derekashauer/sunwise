@@ -139,18 +139,6 @@ class CronController
     private function logCronRun(string $jobName, int $processed, int $skipped, array $errors): void
     {
         try {
-            // Create table if it doesn't exist
-            db()->exec('
-                CREATE TABLE IF NOT EXISTS cron_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_name TEXT NOT NULL,
-                    ran_at TEXT DEFAULT (datetime("now")),
-                    processed INTEGER DEFAULT 0,
-                    skipped INTEGER DEFAULT 0,
-                    errors TEXT,
-                    success INTEGER DEFAULT 1
-                )
-            ');
 
             $stmt = db()->prepare('
                 INSERT INTO cron_log (job_name, processed, skipped, errors, success)
@@ -206,22 +194,6 @@ class CronController
             return ['status' => 401, 'data' => ['error' => 'Authentication required']];
         }
 
-        // Create table if it doesn't exist (in case cron never ran)
-        try {
-            db()->exec('
-                CREATE TABLE IF NOT EXISTS cron_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_name TEXT NOT NULL,
-                    ran_at TEXT DEFAULT (datetime("now")),
-                    processed INTEGER DEFAULT 0,
-                    skipped INTEGER DEFAULT 0,
-                    errors TEXT,
-                    success INTEGER DEFAULT 1
-                )
-            ');
-        } catch (Exception $e) {
-            // Table might already exist
-        }
 
         // Get last run for each job type
         $stmt = db()->query('

@@ -25,6 +25,18 @@ CREATE TABLE IF NOT EXISTS plant_schedule_overrides (
     FOREIGN KEY (plant_id) REFERENCES plants(id) ON DELETE CASCADE
 );
 
+-- Cron run history (was created on the fly with a DEFAULT that newer
+-- SQLite builds reject because of the double-quoted "now")
+CREATE TABLE IF NOT EXISTS cron_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_name TEXT NOT NULL,
+    ran_at TEXT DEFAULT (datetime('now')),
+    processed INTEGER DEFAULT 0,
+    skipped INTEGER DEFAULT 0,
+    errors TEXT,
+    success INTEGER DEFAULT 1
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_plant_type_pending ON tasks(plant_id, task_type, completed_at, skipped_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_generated_from ON tasks(generated_from_task_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_skipped_by ON tasks(skipped_by_task_id);
