@@ -2,6 +2,49 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.15.0] - 2026-11-16
+
+### Fixed
+- **Turning off fertilize tasks could stop all watering reminders** - The daily cleanup skipped a water task whenever a fertilize task was also due, including fertilize tasks hidden by Settings. Turning a type off didn't remove its pending tasks either, so the water task was skipped and pushed to tomorrow every day. Turning a type off now retires its pending tasks, the cleanup respects your settings, and turning it back on restarts the schedule
+- **A bad AI reply could wipe a plant's schedule** - When the care plan reply was cut off or wasn't clean JSON, the app deleted the plant's pending tasks and saved an empty plan. It now falls back to the default plan. Care plans also use structured outputs, so the reply always fits the expected shape
+- **Check readings never reached the AI** - The moisture, light and health readings from checks were left out of the care plan request. They're included now
+- **Schedule changes were forgotten** - "Water every 9 days" was saved to a column that didn't exist, so the next plan rebuild threw it away. Hand-set intervals are now saved as overrides that rebuilds and season changes keep
+- **Task tips and "adjust schedule" never used AI** - They looked up API keys in a table that doesn't exist. They now use your own AI provider and key
+- **The model picked in Settings was never used** - Every request used the built-in default. Your choice now applies
+- **"Completed today" showed every task ever completed** - It now shows only today's, which also makes the Today screen faster
+- **Bulk complete and skip used different rules** - "Complete all" didn't run the follow-up rules, and "Skip all" pushed a skipped watering out a full cycle instead of to tomorrow. Single and bulk actions now share one set of rules. Check tasks are left out of "Complete all" so their readings are always recorded
+- **Wet soil moved watering to tomorrow** - A check showing 7/10 or wetter now holds off watering for part of the interval (longer the wetter it is). A bone-dry reading moves watering to today
+- **Auto-skipped water tasks lost their details** - Follow-up tasks now keep their care plan link, instructions and priority
+- **Turning off check tasks rebuilt every plan every week** - The weekly job no longer treats a missing check task as a problem when checks are turned off
+- **Evening care was counted as the next day** - "Today" now follows your own time zone, and stored times are UTC throughout
+- **Plants added without a photo had no tasks** - They now get a care plan right away
+- **Logging care by hand didn't clear the task** - Logging "Watered", "Misted" and so on now completes the matching task if it's due within two days. You can also pick an earlier date when logging
+- **Photo health checks ignored your AI choice** - They now use your provider and run after the page responds
+- **The daily email could disagree with the app** - It now uses the same task list as Today, including household plants and room names
+- **Push notifications said "enabled" but never subscribed** - Push now really subscribes, and the server sends VAPID-signed reminders at your reminder time
+- **AI status and cron status returned errors** - Fixed a router bug and a table definition that newer SQLite versions reject
+- **New migrations never ran on deploy** - The migration runner now tracks which files have run and skips columns that already exist. Migration 004 also had a statement SQLite can't run
+
+### Added
+- **Fertilizer method setting** - Choose slow-release granules like Osmocote (the default, about every 4 months) or liquid fertilizer mixed into water. With granules, fertilizing is fully separate from watering
+- **Winter rest** - No fertilizing from September through February. Fertilize tasks move to March 1. Fertilizing also waits 3 months after a repot
+- **Plant care settings** - Time zone, climate notes (like "Colorado Front Range, dry winter air") and fertilizer method. The AI uses these for care plans, tips and chat
+- **One-tap complete with Undo** - Tap once to finish a task, then Undo for a few seconds. "Complete all" has Undo too
+- **Snooze** - Move a task to tomorrow, 3 days out, or a day you pick, without counting it as skipped
+- **Late chips** - Tasks show how many days late they are, and late tasks sort first
+- **"Why now"** - Task details show how often a task repeats and when it was last done
+- **Plant cards show watering status** - "Watered 4 days ago · next in 3 days"
+- **Works offline** - The app shell and your last task lists are cached. Completes, skips and snoozes made offline are saved and synced when you're back online. Losing signal no longer logs you out
+- **Installable app** - Real app icons, an install prompt, and an "Add to Home Screen" hint on iPhone. A notice appears when a new version is ready
+- **Scheduler tests** - 37 tests in `api/tests/run.php`, run on every push
+
+### Changed
+- **AI models** - Claude choices are now Claude Opus 5.5 (default), Sonnet 5.5 and Haiku 5.5. Older saved choices switch to the default. Token limits are higher because newer models think before they answer
+- **Security** - Fixed a SQL injection in the chat "update schedule" action. Cron endpoints now require `CRON_SECRET` (an `X-Cron-Key` header or `?key=`). The API won't start in production without a real `JWT_SECRET`
+- **Accessibility** - Darker text and button colors for contrast, labels on icon-only buttons, larger tap targets, dialogs that trap focus and close with Escape, pinch zoom allowed, and reduced motion respected
+- **Code structure** - Scheduling rules live in `CareScheduler`, and both AI providers share one care plan prompt. On the front end, task types and date helpers are shared. The task row is split into smaller components
+- **Removed stale build zips** from the repository
+
 ## [0.14.9] - 2026-09-18
 
 ### Changed
