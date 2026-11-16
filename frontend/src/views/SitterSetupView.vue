@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { usePlantsStore } from '@/stores/plants'
 import { useApi } from '@/composables/useApi'
+import { toLocalDateInput, addDays } from '@/utils/dates'
 
 const plants = usePlantsStore()
 const api = useApi()
@@ -31,11 +32,11 @@ const selectedTaskTypes = ref(['water', 'mist', 'change_water', 'fertilize', 'ro
 onMounted(() => {
   plants.fetchPlants()
 
-  // Set default dates
+  // Default to today through a week from now, in local dates. toISOString()
+  // gives the UTC date, which is already tomorrow on US evenings.
   const today = new Date()
-  const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000)
-  startDate.value = today.toISOString().split('T')[0]
-  endDate.value = nextWeek.toISOString().split('T')[0]
+  startDate.value = toLocalDateInput(today)
+  endDate.value = toLocalDateInput(addDays(today, 7))
 })
 
 const allSelected = computed(() =>

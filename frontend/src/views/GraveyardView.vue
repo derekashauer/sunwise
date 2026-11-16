@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
+import { parseUtc } from '@/utils/dates'
 
 const router = useRouter()
 const api = useApi()
@@ -34,8 +35,9 @@ function getPlantImage(plant) {
 }
 
 function formatDate(dateString) {
-  if (!dateString) return ''
-  return new Date(dateString).toLocaleDateString('en-US', {
+  const date = parseUtc(dateString)
+  if (!date) return ''
+  return date.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'

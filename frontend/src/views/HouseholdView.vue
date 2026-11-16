@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
+import { parseUtc } from '@/utils/dates'
 
 const router = useRouter()
 const api = useApi()
@@ -232,7 +233,7 @@ const isOwner = computed(() => {
 })
 
 function formatDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString()
+  return parseUtc(dateStr)?.toLocaleDateString() || ''
 }
 </script>
 

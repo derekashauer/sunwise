@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { useApi } from '@/composables/useApi'
+import BaseModal from '@/components/common/BaseModal.vue'
 
 const props = defineProps({
   plantId: { type: [Number, String], required: true },
@@ -42,31 +43,14 @@ function close() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div
-      v-if="visible"
-      class="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
-    >
-      <!-- Backdrop -->
-      <div class="absolute inset-0 bg-black/50" @click="close"></div>
-
-      <!-- Modal -->
-      <div class="relative bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
-        <!-- Header -->
-        <div class="sticky top-0 bg-white border-b px-4 py-3 flex items-center justify-between z-10">
-          <div>
-            <h2 class="font-semibold text-gray-900">Care Guide</h2>
-            <p class="text-sm text-gray-500">{{ species || plantName }}</p>
-          </div>
-          <button @click="close" class="p-2 text-gray-400 hover:text-gray-600 -mr-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <!-- Content -->
-        <div class="flex-1 overflow-y-auto p-4">
+  <BaseModal
+    :visible="visible"
+    title="Care guide"
+    :subtitle="species || plantName"
+    size="lg"
+    close-label="Close care guide"
+    @close="close"
+  >
           <!-- Loading -->
           <div v-if="loading" class="flex items-center justify-center py-12">
             <div class="flex items-center gap-3 text-plant-600">
@@ -285,8 +269,5 @@ function close() {
             <p>No care information available for this plant.</p>
             <p class="text-sm mt-2">Make sure a species has been identified.</p>
           </div>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+  </BaseModal>
 </template>

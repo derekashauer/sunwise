@@ -168,12 +168,16 @@ const canUseProvider = computed(() => {
   <div
     v-if="visible"
     class="fixed inset-0 bg-black/50 flex flex-col z-50"
+    role="dialog"
+    aria-modal="true"
+    :aria-label="`Chat about ${plant.name}`"
     @click.self="emit('close')"
+    @keydown.esc="emit('close')"
   >
     <div class="bg-white flex flex-col h-full safe-top safe-bottom">
       <!-- Header -->
       <header class="flex items-center gap-3 px-4 py-3 border-b bg-white">
-        <button @click="emit('close')" class="btn-ghost p-2 -ml-2">
+        <button type="button" @click="emit('close')" class="btn-ghost p-2 -ml-2" aria-label="Close chat">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -187,6 +191,7 @@ const canUseProvider = computed(() => {
         <select
           v-if="hasAnyKey"
           v-model="selectedProvider"
+          aria-label="AI provider"
           class="text-sm border rounded-lg px-2 py-1 bg-gray-50"
         >
           <option v-if="aiSettings?.has_openai_key" value="openai">GPT-5.2</option>
@@ -278,14 +283,17 @@ const canUseProvider = computed(() => {
             :disabled="loading || !canUseProvider"
             rows="1"
             class="flex-1 input resize-none py-2"
+            aria-label="Message"
             placeholder="Ask about your plant..."
           ></textarea>
           <button
+            type="button"
             @click="sendMessage"
             :disabled="!inputMessage.trim() || loading || !canUseProvider"
             class="btn-primary px-4"
+            aria-label="Send message"
           >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
             </svg>
           </button>

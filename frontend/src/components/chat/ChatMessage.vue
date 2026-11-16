@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { parseUtc } from '@/utils/dates'
 
 const props = defineProps({
   message: { type: Object, required: true }
@@ -9,7 +10,9 @@ const isUser = computed(() => props.message.role === 'user')
 
 const formattedTime = computed(() => {
   if (!props.message.created_at) return ''
-  const date = new Date(props.message.created_at)
+  // Saved messages carry a UTC database time; new ones carry an ISO string.
+  const date = parseUtc(props.message.created_at)
+  if (!date) return ''
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 })
 
