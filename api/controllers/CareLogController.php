@@ -11,22 +11,7 @@ class CareLogController
      */
     private function canAccessPlant(int $plantId, int $userId): bool
     {
-        // Check ownership
-        $stmt = db()->prepare('SELECT user_id FROM plants WHERE id = ?');
-        $stmt->execute([$plantId]);
-        $plant = $stmt->fetch();
-
-        if (!$plant) return false;
-        if ($plant['user_id'] == $userId) return true;
-
-        // Check household access
-        $stmt = db()->prepare('
-            SELECT 1 FROM household_plants hp
-            JOIN household_members hm ON hp.household_id = hm.household_id
-            WHERE hp.plant_id = ? AND hm.user_id = ?
-        ');
-        $stmt->execute([$plantId, $userId]);
-        return (bool)$stmt->fetch();
+        return CareScheduler::canAccessPlant($plantId, $userId);
     }
 
     /**
@@ -137,22 +122,36 @@ class CareLogController
     }
 
     /**
-     * Create care log entry
+     * Create care log entry.
+     *
+     * performed_at may be a local date ("2026-11-15") or local date-time
+     * ("2026-11-15T18:30"); it is stored in UTC. If the action matches a
+     * pending task due within the next two days, that task is completed too,
+     * so logging "Watered" from the plant page clears the water task.
      */
     public function store(array $params, array $body, ?int $userId): array
     {
-        $plantId = $params['id'];
+        $plantId = (int) $params['id'];
         $action = trim($body['action'] ?? '');
         $notes = trim($body['notes'] ?? '');
-        $performedAt = $body['performed_at'] ?? null;
 
         if (!$action) {
             return ['status' => 400, 'data' => ['error' => 'Action type is required']];
         }
+        if (mb_strlen($action) > 50) {
+            return ['status' => 400, 'data' => ['error' => 'Action name too long (max 50 chars)']];
+        }
 
-        // Verify plant access (owned or shared via household)
-        if (!$this->canAccessPlant($plantId, $userId)) {
+        if (!CareScheduler::canAccessPlant($plantId, $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
+        }
+
+        $performedAt = Clock::utcNow();
+        if (!empty($body['performed_at'])) {
+            $performedAt = Clock::localToUtc((string) $body['performed_at']);
+            if (!$performedAt) {
+                return ['status' => 400, 'data' => ['error' => 'Pick a date that is today or earlier']];
+            }
         }
 
         // Handle photo upload if present
@@ -166,28 +165,56 @@ class CareLogController
 
                 $stmt = db()->prepare('INSERT INTO photos (plant_id, filename, thumbnail) VALUES (?, ?, ?)');
                 $stmt->execute([$plantId, $filename, $thumbnail]);
-                $photoId = db()->lastInsertId();
+                $photoId = (int) db()->lastInsertId();
 
-                // Trigger AI health analysis in background
-                $this->triggerHealthAnalysis($plantId, $photoId, $filename);
+                // Health analysis runs after the response is sent
+                $analysisPhotoId = $photoId;
+                Deferred::add(function () use ($plantId, $analysisPhotoId, $filename, $userId) {
+                    $this->triggerHealthAnalysis($plantId, $analysisPhotoId, $filename, $userId);
+                });
             }
         }
 
-        // Insert care log entry with performer attribution
-        $sql = 'INSERT INTO care_log (plant_id, action, notes, photo_id, performed_by_user_id';
-        $values = [$plantId, $action, $notes ?: null, $photoId, $userId];
-
-        if ($performedAt) {
-            $sql .= ', performed_at) VALUES (?, ?, ?, ?, ?, ?)';
-            $values[] = $performedAt;
-        } else {
-            $sql .= ') VALUES (?, ?, ?, ?, ?)';
+        // Find a matching pending task to close
+        $matchingTask = null;
+        $taskType = CareScheduler::ACTION_TO_TASK[$action] ?? null;
+        if ($taskType) {
+            $stmt = db()->prepare('
+                SELECT id FROM tasks
+                WHERE plant_id = ? AND task_type = ? AND completed_at IS NULL AND skipped_at IS NULL
+                  AND due_date <= ?
+                ORDER BY due_date ASC LIMIT 1
+            ');
+            $stmt->execute([$plantId, $taskType, Clock::daysFromToday(2)]);
+            $matchId = $stmt->fetchColumn();
+            if ($matchId) {
+                $matchingTask = CareScheduler::loadTask((int) $matchId);
+            }
         }
 
-        $stmt = db()->prepare($sql);
-        $stmt->execute($values);
-
+        $stmt = db()->prepare('
+            INSERT INTO care_log (plant_id, task_id, action, notes, photo_id, performed_by_user_id, performed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ');
+        $stmt->execute([
+            $plantId,
+            $matchingTask['id'] ?? null,
+            $action,
+            $notes ?: null,
+            $photoId,
+            $userId,
+            $performedAt,
+        ]);
         $logId = db()->lastInsertId();
+
+        $completedTaskId = null;
+        if ($matchingTask) {
+            // The log entry above is the record; don't write a second one
+            (new CareScheduler())->complete($matchingTask, $userId, $notes ?: null, null, false);
+            $completedTaskId = (int) $matchingTask['id'];
+        } elseif (in_array($action, ['repot', 'pot_up'], true)) {
+            (new CareScheduler())->normalizePendingFertilize($plantId);
+        }
 
         // Fetch the created entry with photo info and performer name
         $stmt = db()->prepare('
@@ -202,7 +229,10 @@ class CareLogController
         ');
         $stmt->execute([$logId]);
 
-        return ['care_log_entry' => $stmt->fetch()];
+        return [
+            'care_log_entry' => $stmt->fetch(),
+            'completed_task_id' => $completedTaskId,
+        ];
     }
 
     /**
@@ -246,9 +276,9 @@ class CareLogController
     }
 
     /**
-     * Trigger async health analysis for uploaded photo
+     * Health analysis for an uploaded photo (runs after the response is sent)
      */
-    private function triggerHealthAnalysis(int $plantId, int $photoId, string $filename): void
+    private function triggerHealthAnalysis(int $plantId, int $photoId, string $filename, ?int $userId = null): void
     {
         try {
             // Get plant data
@@ -258,7 +288,8 @@ class CareLogController
 
             if (!$plant) return;
 
-            $claudeService = new ClaudeService();
+            // Use the owner's chosen AI provider and key
+            $claudeService = AIServiceFactory::getForUser($userId ?? (int) $plant['user_id']);
             $imagePath = UPLOAD_PATH . '/plants/' . $filename;
 
             $result = $claudeService->analyzeHealth($imagePath, $plant);

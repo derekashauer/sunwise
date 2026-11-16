@@ -17,7 +17,9 @@ ALTER TABLE locations ADD COLUMN window_orientation TEXT CHECK (window_orientati
 
 -- Add public sharing to users
 ALTER TABLE users ADD COLUMN public_gallery_enabled INTEGER DEFAULT 0;
-ALTER TABLE users ADD COLUMN public_gallery_token TEXT UNIQUE;
+-- SQLite cannot add a UNIQUE column, so add the column and a unique index
+ALTER TABLE users ADD COLUMN public_gallery_token TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_gallery_token ON users(public_gallery_token);
 ALTER TABLE users ADD COLUMN public_gallery_name TEXT;
 
 -- Add species candidates to plants for AI picker

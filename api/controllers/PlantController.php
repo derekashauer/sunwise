@@ -29,22 +29,7 @@ class PlantController
      */
     private function canAccessPlant(int $plantId, int $userId): bool
     {
-        // Check ownership
-        $stmt = db()->prepare('SELECT user_id FROM plants WHERE id = ?');
-        $stmt->execute([$plantId]);
-        $plant = $stmt->fetch();
-
-        if (!$plant) return false;
-        if ($plant['user_id'] == $userId) return true;
-
-        // Check household access
-        $stmt = db()->prepare('
-            SELECT 1 FROM household_plants hp
-            JOIN household_members hm ON hp.household_id = hm.household_id
-            WHERE hp.plant_id = ? AND hm.user_id = ?
-        ');
-        $stmt->execute([$plantId, $userId]);
-        return (bool)$stmt->fetch();
+        return CareScheduler::canAccessPlant($plantId, $userId);
     }
 
     /**
@@ -67,6 +52,7 @@ class PlantController
      */
     public function index(array $params, array $body, ?int $userId): array
     {
+        $userId = (int) $userId;
         $accessCondition = $this->getAccessiblePlantIds($userId);
 
         $stmt = db()->query("
@@ -77,7 +63,12 @@ class PlantController
                    CASE WHEN p.user_id != {$userId} THEN
                        (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1))
                         FROM users u WHERE u.id = p.user_id)
-                   ELSE NULL END as owner_name
+                   ELSE NULL END as owner_name,
+                   (SELECT MAX(cl.performed_at) FROM care_log cl
+                    WHERE cl.plant_id = p.id AND cl.action IN ('water', 'change_water')) as last_watered_at,
+                   (SELECT MIN(t.due_date) FROM tasks t
+                    WHERE t.plant_id = p.id AND t.task_type IN ('water', 'change_water')
+                      AND t.completed_at IS NULL AND t.skipped_at IS NULL) as next_water_due
             FROM plants p
             LEFT JOIN locations l ON p.location_id = l.id
             WHERE {$accessCondition} AND p.archived_at IS NULL
@@ -281,7 +272,7 @@ class PlantController
 
                     // Generate species care info (only if not inherited)
                     try {
-                        $claudeService = new ClaudeService();
+                        $claudeService = AIServiceFactory::getForUser($userId);
                         $careInfo = $claudeService->generateSpeciesCareInfo($species);
                         if ($careInfo) {
                             $stmt = db()->prepare('UPDATE plants SET species_care_info = ? WHERE id = ?');
@@ -304,6 +295,18 @@ class PlantController
             } else {
                 // No species entered or inherited - trigger AI identification
                 $this->triggerAIIdentification($plantId, $photoId, $imageFilename, $userId);
+            }
+        }
+
+        // Plants added without a photo still need a schedule. Before, they
+        // had no tasks until their page was opened or the weekly job ran.
+        $stmt = db()->prepare('SELECT 1 FROM care_plans WHERE plant_id = ? AND is_active = 1');
+        $stmt->execute([$plantId]);
+        if (!$stmt->fetch()) {
+            try {
+                (new CarePlanController())->generateCarePlan((int) $plantId, $userId);
+            } catch (Exception $e) {
+                error_log('Failed to generate initial care plan: ' . $e->getMessage());
             }
         }
 
@@ -472,7 +475,7 @@ class PlantController
 
         // Generate species care info
         try {
-            $claudeService = new ClaudeService();
+            $claudeService = AIServiceFactory::getForUser($userId);
             $careInfo = $claudeService->generateSpeciesCareInfo($species);
             if ($careInfo) {
                 $stmt = db()->prepare('UPDATE plants SET species_care_info = ? WHERE id = ?');
@@ -487,7 +490,7 @@ class PlantController
         // Regenerate care plan with confirmed species
         try {
             $carePlanController = new CarePlanController();
-            $carePlanController->generateCarePlan($plantId);
+            $carePlanController->generateCarePlan((int) $plantId, $userId);
         } catch (Exception $e) {
             error_log('Failed to regenerate care plan: ' . $e->getMessage());
         }

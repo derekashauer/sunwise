@@ -97,7 +97,8 @@ class PhotoController
             $stmt->execute([$plantId]);
             $plant = $stmt->fetch();
 
-            $claudeService = new ClaudeService();
+            // Use the owner's chosen AI provider and key
+            $claudeService = AIServiceFactory::getForUser($userId ?? (int) $plant['user_id']);
             $imagePath = UPLOAD_PATH . '/plants/' . $filename;
 
             $result = $claudeService->analyzeHealth($imagePath, $plant);

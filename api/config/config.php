@@ -27,7 +27,7 @@ define('APP_DEBUG', getenv('APP_DEBUG') === 'true');
 define('APP_URL', getenv('APP_URL') ?: 'https://sunwise.dev');
 
 // Database
-define('DB_PATH', __DIR__ . '/../../data/sunwise.db');
+define('DB_PATH', getenv('SUNWISE_DB_PATH') ?: __DIR__ . '/../../data/sunwise.db');
 
 // JWT
 define('JWT_SECRET', getenv('JWT_SECRET') ?: 'change-this-secret-in-production');
@@ -35,7 +35,7 @@ define('JWT_EXPIRY', 86400 * 7); // 7 days
 
 // AI APIs
 define('CLAUDE_API_KEY', getenv('CLAUDE_API_KEY') ?: '');
-define('CLAUDE_MODEL', 'claude-opus-4-5-20251101');  // Claude Opus 4.5
+define('CLAUDE_MODEL', 'claude-opus-5-5');  // Claude Opus 5.5 (default; users can pick another in Settings)
 define('OPENAI_MODEL', 'gpt-5.2');  // GPT-5.2
 
 // Encryption key for storing user API keys (32 bytes = 64 hex chars)

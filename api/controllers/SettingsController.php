@@ -6,21 +6,9 @@
 
 class SettingsController
 {
-    // Available AI models
-    private const CLAUDE_MODELS = [
-        'claude-opus-4-5-20251101' => 'Claude Opus 4.5 (Most capable)',
-        'claude-sonnet-4-20250514' => 'Claude Sonnet 4 (Balanced)',
-        'claude-3-5-haiku-20241022' => 'Claude Haiku 3.5 (Fast & cheap)'
-    ];
-
-    private const OPENAI_MODELS = [
-        'gpt-5.2' => 'GPT-5.2 (Most capable)',
-        'gpt-4.5-preview' => 'GPT-4.5 Preview',
-        'gpt-4o' => 'GPT-4o (Balanced)',
-        'gpt-4o-mini' => 'GPT-4o Mini (Fast & cheap)',
-        'o1' => 'o1 (Advanced reasoning)',
-        'o1-mini' => 'o1 Mini (Efficient reasoning)'
-    ];
+    // Available AI models (defined once in AIServiceFactory)
+    private const CLAUDE_MODELS = AIServiceFactory::CLAUDE_MODELS;
+    private const OPENAI_MODELS = AIServiceFactory::OPENAI_MODELS;
 
     /**
      * Get AI settings for user
@@ -40,8 +28,8 @@ class SettingsController
                 'has_openai_key' => false,
                 'claude_key_added_at' => null,
                 'openai_key_added_at' => null,
-                'claude_model' => 'claude-sonnet-4-20250514',
-                'openai_model' => 'gpt-4o',
+                'claude_model' => AIServiceFactory::DEFAULT_CLAUDE_MODEL,
+                'openai_model' => AIServiceFactory::DEFAULT_OPENAI_MODEL,
                 'available_models' => [
                     'claude' => self::CLAUDE_MODELS,
                     'openai' => self::OPENAI_MODELS
@@ -55,8 +43,8 @@ class SettingsController
             'has_openai_key' => !empty($settings['openai_api_key_encrypted']),
             'claude_key_added_at' => $settings['claude_key_added_at'],
             'openai_key_added_at' => $settings['openai_key_added_at'],
-            'claude_model' => $settings['claude_model'] ?? 'claude-sonnet-4-20250514',
-            'openai_model' => $settings['openai_model'] ?? 'gpt-4o',
+            'claude_model' => AIServiceFactory::resolveModel('claude', $settings['claude_model'] ?? null),
+            'openai_model' => AIServiceFactory::resolveModel('openai', $settings['openai_model'] ?? null),
             'available_models' => [
                 'claude' => self::CLAUDE_MODELS,
                 'openai' => self::OPENAI_MODELS
@@ -508,6 +496,8 @@ class SettingsController
                 continue;
             }
 
+            $wasEnabled = !in_array($taskType, CareScheduler::disabledTypes($userId), true);
+
             // Upsert setting
             $stmt = db()->prepare('
                 INSERT INTO task_type_settings (user_id, task_type, enabled)
@@ -515,9 +505,162 @@ class SettingsController
                 ON CONFLICT(user_id, task_type) DO UPDATE SET enabled = excluded.enabled
             ');
             $stmt->execute([$userId, $taskType, $enabled ? 1 : 0]);
+
+            if ($wasEnabled && !$enabled) {
+                $this->retireTaskType($userId, $taskType);
+            } elseif (!$wasEnabled && $enabled) {
+                $this->restoreTaskType($userId, $taskType);
+            }
         }
 
         return $this->getTaskTypes($params, $body, $userId);
+    }
+
+    /**
+     * Turning a type off retires its pending tasks on the user's own plants,
+     * so hidden tasks can't keep running (or block watering) in the background.
+     */
+    private function retireTaskType(int $userId, string $taskType): void
+    {
+        $stmt = db()->prepare("
+            UPDATE tasks SET skipped_at = ?, skip_reason = 'Task type turned off in Settings'
+            WHERE task_type = ? AND completed_at IS NULL AND skipped_at IS NULL
+              AND plant_id IN (SELECT id FROM plants WHERE user_id = ?)
+        ");
+        $stmt->execute([Clock::utcNow(), $taskType, $userId]);
+    }
+
+    /**
+     * Turning a type back on restarts its schedule from the task that was
+     * retired, or leaves it for the next care plan rebuild if there was none.
+     */
+    private function restoreTaskType(int $userId, string $taskType): void
+    {
+        $stmt = db()->prepare("
+            SELECT t.id FROM tasks t
+            JOIN plants p ON t.plant_id = p.id
+            WHERE p.user_id = ? AND p.archived_at IS NULL
+              AND t.task_type = ? AND t.skip_reason = 'Task type turned off in Settings'
+              AND t.id = (SELECT MAX(id) FROM tasks t2 WHERE t2.plant_id = t.plant_id AND t2.task_type = t.task_type)
+        ");
+        $stmt->execute([$userId, $taskType]);
+
+        $scheduler = new CareScheduler();
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $taskId) {
+            $task = CareScheduler::loadTask((int) $taskId);
+            if (!$task || empty($task['recurrence'])) {
+                continue;
+            }
+            $due = $scheduler->normalizeDueDate($task, Clock::today());
+            $insert = db()->prepare('
+                INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, instructions, priority)
+                SELECT ?, ?, ?, ?, ?, ?, ?
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM tasks WHERE plant_id = ? AND task_type = ? AND completed_at IS NULL AND skipped_at IS NULL
+                )
+            ');
+            $insert->execute([
+                $task['care_plan_id'], $task['plant_id'], $task['task_type'], $due,
+                $task['recurrence'], $task['instructions'], $task['priority'] ?: 'normal',
+                $task['plant_id'], $task['task_type'],
+            ]);
+        }
+    }
+
+    /**
+     * Get plant care preferences
+     * GET /settings/care
+     */
+    public function getCareSettings(array $params, array $body, ?int $userId): array
+    {
+        $stmt = db()->prepare('SELECT timezone, climate_notes, fertilizer_method, winter_rest FROM users WHERE id = ?');
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch() ?: [];
+
+        return [
+            'timezone' => $row['timezone'] ?? DEFAULT_TIMEZONE,
+            'climate_notes' => $row['climate_notes'] ?? '',
+            'fertilizer_method' => ($row['fertilizer_method'] ?? 'separate') === 'mixed' ? 'mixed' : 'separate',
+            'winter_rest' => !isset($row['winter_rest']) || (int) $row['winter_rest'] === 1,
+        ];
+    }
+
+    /**
+     * Update plant care preferences
+     * PUT /settings/care { timezone?, climate_notes?, fertilizer_method?, winter_rest? }
+     */
+    public function updateCareSettings(array $params, array $body, ?int $userId): array
+    {
+        $fields = [];
+        $values = [];
+
+        if (array_key_exists('timezone', $body)) {
+            $timezone = (string) $body['timezone'];
+            if (!Clock::isValidTimezone($timezone)) {
+                return ['status' => 400, 'data' => ['error' => 'Pick a time zone from the list']];
+            }
+            $fields[] = 'timezone = ?';
+            $values[] = $timezone;
+        }
+
+        if (array_key_exists('climate_notes', $body)) {
+            $notes = trim((string) $body['climate_notes']);
+            if (mb_strlen($notes) > 500) {
+                return ['status' => 400, 'data' => ['error' => 'Keep climate notes under 500 characters']];
+            }
+            $fields[] = 'climate_notes = ?';
+            $values[] = $notes !== '' ? $notes : null;
+        }
+
+        if (array_key_exists('fertilizer_method', $body)) {
+            if (!in_array($body['fertilizer_method'], ['separate', 'mixed'], true)) {
+                return ['status' => 400, 'data' => ['error' => 'Fertilizer method must be "separate" or "mixed"']];
+            }
+            $fields[] = 'fertilizer_method = ?';
+            $values[] = $body['fertilizer_method'];
+        }
+
+        if (array_key_exists('winter_rest', $body)) {
+            $fields[] = 'winter_rest = ?';
+            $values[] = !empty($body['winter_rest']) ? 1 : 0;
+        }
+
+        if (!empty($fields)) {
+            $values[] = $userId;
+            $stmt = db()->prepare('UPDATE users SET ' . implode(', ', $fields) . ' WHERE id = ?');
+            $stmt->execute($values);
+        }
+
+        // Apply new fertilizer rules to pending fertilize tasks right away
+        if (array_key_exists('fertilizer_method', $body) || array_key_exists('winter_rest', $body)) {
+            Clock::useUserTimezone($userId);
+            $this->applyFertilizerSettings($userId);
+        }
+
+        return $this->getCareSettings($params, $body, $userId);
+    }
+
+    /**
+     * Re-time pending fertilize tasks after the fertilizer settings change.
+     * Switching to granules stretches the interval to about 4 months.
+     */
+    private function applyFertilizerSettings(int $userId): void
+    {
+        $scheduler = new CareScheduler();
+        $stmt = db()->prepare("
+            SELECT t.* FROM tasks t
+            JOIN plants p ON t.plant_id = p.id
+            WHERE p.user_id = ? AND t.task_type = 'fertilize'
+              AND t.completed_at IS NULL AND t.skipped_at IS NULL
+        ");
+        $stmt->execute([$userId]);
+
+        foreach ($stmt->fetchAll() as $task) {
+            $interval = $scheduler->intervalFor($task);
+            db()->prepare('UPDATE tasks SET recurrence = ? WHERE id = ?')
+                ->execute([json_encode(['type' => 'days', 'interval' => $interval]), $task['id']]);
+            $scheduler->normalizePendingFertilize((int) $task['plant_id']);
+        }
     }
 
     /**

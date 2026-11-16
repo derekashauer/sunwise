@@ -12,7 +12,7 @@ ini_set('log_errors', 1);
 // CORS headers
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Cron-Key');
 header('Content-Type: application/json');
 
 // Prevent caching of API responses
@@ -30,6 +30,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // Load configuration
 require_once __DIR__ . '/config/config.php';
 require_once __DIR__ . '/config/database.php';
+
+// Refuse to run in production with a missing or publicly known login secret.
+// Anyone could forge login tokens otherwise.
+if (APP_ENV === 'production' && (JWT_SECRET === '' || JWT_SECRET === 'change-this-secret-in-production' || strlen(JWT_SECRET) < 16)) {
+    error_log('JWT_SECRET is missing or too weak. Set a random value of 16+ characters in .env');
+    http_response_code(500);
+    echo json_encode(['error' => 'Sunwise is not configured yet. The server needs a JWT_SECRET.']);
+    exit;
+}
 
 // Autoload classes
 spl_autoload_register(function ($class) {
@@ -110,8 +119,11 @@ $routes = [
     'GET /tasks/plant/{id}' => ['TaskController', 'forPlant', true],
     'POST /tasks/bulk-complete' => ['TaskController', 'bulkComplete', true],
     'POST /tasks/bulk-skip' => ['TaskController', 'bulkSkip', true],
+    'POST /tasks/bulk-uncomplete' => ['TaskController', 'bulkUncomplete', true],
     'POST /tasks/{id}/complete' => ['TaskController', 'complete', true],
+    'POST /tasks/{id}/uncomplete' => ['TaskController', 'uncomplete', true],
     'POST /tasks/{id}/skip' => ['TaskController', 'skip', true],
+    'POST /tasks/{id}/snooze' => ['TaskController', 'snooze', true],
     'GET /tasks/{id}/recommendations' => ['TaskController', 'recommendations', true],
     'POST /tasks/{id}/adjust-schedule' => ['TaskController', 'adjustSchedule', true],
     'POST /tasks/{id}/apply-adjustment' => ['TaskController', 'applyAdjustment', true],
@@ -133,6 +145,7 @@ $routes = [
     'POST /ai/health-check' => ['AIController', 'healthCheck', true],
 
     // Notification routes
+    'GET /notifications/vapid-public-key' => ['NotificationController', 'vapidPublicKey', true],
     'POST /notifications/subscribe' => ['NotificationController', 'subscribe', true],
     'DELETE /notifications/unsubscribe' => ['NotificationController', 'unsubscribe', true],
 
@@ -147,6 +160,10 @@ $routes = [
     'GET /settings/ai/status' => ['SettingsController', 'getAiStatus', true],
     'GET /settings/ai/log' => ['SettingsController', 'getAiLog', true],
     'POST /settings/ai/test' => ['SettingsController', 'testAiConnection', true],
+
+    // Plant care preferences (time zone, climate, fertilizer method)
+    'GET /settings/care' => ['SettingsController', 'getCareSettings', true],
+    'PUT /settings/care' => ['SettingsController', 'updateCareSettings', true],
 
     // Task type settings routes
     'GET /settings/task-types' => ['SettingsController', 'getTaskTypes', true],
@@ -199,7 +216,7 @@ $routes = [
     'DELETE /shopping-list/{id}' => ['ShoppingListController', 'destroy', true],
     'DELETE /shopping-list/purchased' => ['ShoppingListController', 'clearPurchased', true],
 
-    // Cron routes (no auth, but protected by secret key in query param)
+    // Cron routes (no auth, but protected by CRON_SECRET via X-Cron-Key header or ?key=)
     'GET /cron/daily-reminders' => ['CronController', 'dailyReminders'],
     'GET /cron/evaluate-plans' => ['CronController', 'evaluatePlans'],
     'GET /cron/status' => ['CronController', 'status', true],
@@ -284,6 +301,11 @@ if ($requiresAuth) {
     }
 }
 
+// "Today" and other dates follow the signed-in user's own time zone
+if ($userId) {
+    Clock::useUserTimezone($userId);
+}
+
 // Get request body
 $body = json_decode(file_get_contents('php://input'), true) ?? [];
 
@@ -299,9 +321,18 @@ try {
 
     http_response_code($response['status'] ?? 200);
     echo json_encode($response['data'] ?? $response);
-} catch (Exception $e) {
+} catch (Throwable $e) {
+    error_log('Unhandled API error on ' . $method . ' ' . $uri . ': ' . $e->getMessage());
     http_response_code(500);
     echo json_encode([
-        'error' => $e->getMessage()
+        // App exceptions carry messages meant for people ("Add your API key in
+        // Settings"). Database and PHP errors can leak internals, so hide those.
+        'error' => (APP_DEBUG || (get_class($e) === 'Exception'))
+            ? $e->getMessage()
+            : 'Something went wrong on the server. Please try again.'
     ]);
 }
+
+// Run background work (like photo analysis) after the response is sent
+Deferred::finishResponse();
+Deferred::run();
