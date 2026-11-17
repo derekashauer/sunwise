@@ -6,18 +6,21 @@
 
 class CronController
 {
-    // Secret key for cron authentication (set in .env as CRON_SECRET)
+    /**
+     * Cron calls must carry CRON_SECRET, in an X-Cron-Key header (preferred,
+     * stays out of server logs) or a ?key= query parameter. With no secret
+     * configured, cron endpoints are closed.
+     */
     private function validateCronKey(array $params): bool
     {
         $cronSecret = getenv('CRON_SECRET') ?: '';
-
-        // If no secret is configured, allow access (for initial setup)
-        if (empty($cronSecret)) {
-            return true;
+        if ($cronSecret === '') {
+            error_log('Cron request refused: CRON_SECRET is not set');
+            return false;
         }
 
-        $providedKey = $params['key'] ?? ($_GET['key'] ?? '');
-        return hash_equals($cronSecret, $providedKey);
+        $providedKey = $_SERVER['HTTP_X_CRON_KEY'] ?? ($params['key'] ?? ($_GET['key'] ?? ''));
+        return is_string($providedKey) && hash_equals($cronSecret, $providedKey);
     }
 
     /**
@@ -29,80 +32,105 @@ class CronController
      */
     public function dailyReminders(array $params, array $body, ?int $userId): array
     {
-        // Validate cron key
         if (!$this->validateCronKey($params)) {
             return ['status' => 403, 'data' => ['error' => 'Invalid cron key']];
         }
 
-        $today = date('Y-m-d');
-        $currentTime = date('H:i');
         $sent = 0;
+        $pushed = 0;
         $skipped = 0;
         $errors = [];
 
-        // Get users who have email digest enabled
-        // We check if their preferred time is within 30 minutes of now
-        // and they haven't received a digest today
-        $stmt = db()->prepare('
-            SELECT u.id, u.email, u.email_digest_time, u.last_digest_sent
-            FROM users u
-            WHERE u.email_digest_enabled = 1
-              AND (u.last_digest_sent IS NULL OR u.last_digest_sent < ?)
-        ');
-        $stmt->execute([$today]);
-        $users = $stmt->fetchAll();
+        // Everyone with email or push turned on. Each person's "today" and
+        // reminder time are worked out in their own time zone.
+        $users = db()->query('
+            SELECT id, email, timezone, email_digest_enabled, email_digest_time,
+                   last_digest_sent, push_subscription, last_push_sent
+            FROM users
+            WHERE email_digest_enabled = 1 OR push_subscription IS NOT NULL
+        ')->fetchAll();
 
         $emailService = new EmailService();
+        $pushService = new PushService();
+        $scheduler = new CareScheduler();
 
         foreach ($users as $user) {
-            // Check if it's time to send (within 30 minute window)
-            $preferredTime = $user['email_digest_time'] ?? '08:00';
+            Clock::useTimezone($user['timezone'] ?? null);
+            $today = Clock::today();
+            $preferredTime = $user['email_digest_time'] ?: '08:00';
 
-            if (!$this->isWithinTimeWindow($currentTime, $preferredTime, 30)) {
+            if (!$this->isWithinTimeWindow(date('H:i'), $preferredTime, 30)) {
                 $skipped++;
                 continue;
             }
 
-            // Get today's tasks for this user (excluding graveyard plants)
-            $tasks = $this->getUserTasks($user['id'], $today);
-
-            // Skip if no tasks
-            if (empty($tasks)) {
-                // Still mark as sent so we don't keep checking
-                $this->markDigestSent($user['id'], $today);
+            $wantsEmail = (int) $user['email_digest_enabled'] === 1 && ($user['last_digest_sent'] ?? '') < $today;
+            $wantsPush = !empty($user['push_subscription']) && ($user['last_push_sent'] ?? '') < $today;
+            if (!$wantsEmail && !$wantsPush) {
                 $skipped++;
                 continue;
             }
 
-            // Extract username from email for greeting
-            $userName = ucfirst(explode('@', $user['email'])[0]);
+            // Same list as the Today screen, after the same daily cleanup
+            $scheduler->reconcile((int) $user['id']);
+            $tasks = $scheduler->tasksForToday((int) $user['id'], false);
 
-            // Send the email
-            try {
-                $result = $emailService->sendDailyReminder($user['email'], $tasks, $userName);
-
-                if ($result) {
-                    $this->markDigestSent($user['id'], $today);
-                    $sent++;
-                } else {
-                    $errors[] = "Failed to send to {$user['email']}";
+            if ($wantsPush) {
+                $this->markSent((int) $user['id'], 'last_push_sent', $today);
+                if (!empty($tasks)) {
+                    try {
+                        if ($pushService->sendToUser((int) $user['id'])) {
+                            $pushed++;
+                        }
+                    } catch (Exception $e) {
+                        $errors[] = "Push failed for user {$user['id']}: " . $e->getMessage();
+                    }
                 }
-            } catch (Exception $e) {
-                $errors[] = "Error sending to {$user['email']}: " . $e->getMessage();
+            }
+
+            if ($wantsEmail) {
+                if (empty($tasks)) {
+                    $this->markSent((int) $user['id'], 'last_digest_sent', $today);
+                    $skipped++;
+                    continue;
+                }
+
+                $userName = ucfirst(explode('@', $user['email'])[0]);
+                try {
+                    if ($emailService->sendDailyReminder($user['email'], $tasks, $userName)) {
+                        $this->markSent((int) $user['id'], 'last_digest_sent', $today);
+                        $sent++;
+                    } else {
+                        $errors[] = "Failed to send email to user {$user['id']}";
+                    }
+                } catch (Exception $e) {
+                    $errors[] = "Error sending email to user {$user['id']}: " . $e->getMessage();
+                }
             }
         }
 
-        // Log the cron run
-        $this->logCronRun('daily_reminders', $sent, $skipped, $errors);
+        Clock::useTimezone(null);
+        $this->logCronRun('daily_reminders', $sent + $pushed, $skipped, $errors);
 
         return [
             'success' => true,
-            'date' => $today,
-            'time' => $currentTime,
             'emails_sent' => $sent,
+            'pushes_sent' => $pushed,
             'skipped' => $skipped,
             'errors' => $errors
         ];
+    }
+
+    /**
+     * Record that today's email or push went out.
+     */
+    private function markSent(int $userId, string $column, string $date): void
+    {
+        if (!in_array($column, ['last_digest_sent', 'last_push_sent'], true)) {
+            return;
+        }
+        $stmt = db()->prepare("UPDATE users SET {$column} = ? WHERE id = ?");
+        $stmt->execute([$date, $userId]);
     }
 
     /**
@@ -111,18 +139,6 @@ class CronController
     private function logCronRun(string $jobName, int $processed, int $skipped, array $errors): void
     {
         try {
-            // Create table if it doesn't exist
-            db()->exec('
-                CREATE TABLE IF NOT EXISTS cron_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_name TEXT NOT NULL,
-                    ran_at TEXT DEFAULT (datetime("now")),
-                    processed INTEGER DEFAULT 0,
-                    skipped INTEGER DEFAULT 0,
-                    errors TEXT,
-                    success INTEGER DEFAULT 1
-                )
-            ');
 
             $stmt = db()->prepare('
                 INSERT INTO cron_log (job_name, processed, skipped, errors, success)
@@ -168,64 +184,6 @@ class CronController
     }
 
     /**
-     * Get task types the user has disabled in settings
-     */
-    private function getDisabledTaskTypes(int $userId): array
-    {
-        $stmt = db()->prepare('SELECT task_type FROM task_type_settings WHERE user_id = ? AND enabled = 0');
-        $stmt->execute([$userId]);
-        return $stmt->fetchAll(PDO::FETCH_COLUMN);
-    }
-
-    /**
-     * Get today's pending tasks for a user
-     * Excludes archived (dead) plants and task types the user has disabled.
-     */
-    private function getUserTasks(int $userId, string $today): array
-    {
-        $disabled = $this->getDisabledTaskTypes($userId);
-        $disabledClause = '';
-        $bindings = [$userId, $today];
-        if (!empty($disabled)) {
-            $placeholders = implode(',', array_fill(0, count($disabled), '?'));
-            $disabledClause = " AND t.task_type NOT IN ({$placeholders})";
-            $bindings = array_merge($bindings, $disabled);
-        }
-
-        $stmt = db()->prepare('
-            SELECT t.id, t.task_type, t.due_date, t.priority,
-                   p.name as plant_name, p.location as plant_location
-            FROM tasks t
-            JOIN plants p ON t.plant_id = p.id
-            WHERE p.user_id = ?
-              AND t.due_date <= ?
-              AND t.completed_at IS NULL
-              AND t.skipped_at IS NULL
-              AND p.archived_at IS NULL' . $disabledClause . '
-            ORDER BY
-                CASE t.priority
-                    WHEN "urgent" THEN 1
-                    WHEN "high" THEN 2
-                    WHEN "normal" THEN 3
-                    WHEN "low" THEN 4
-                    ELSE 5
-                END,
-                t.due_date ASC
-        ');
-        $stmt->execute($bindings);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    /**
-     * Mark that we sent a digest to this user today
-     */
-    private function markDigestSent(int $userId, string $date): void
-    {
-        $stmt = db()->prepare('UPDATE users SET last_digest_sent = ? WHERE id = ?');
-        $stmt->execute([$date, $userId]);
-    }
-
-    /**
      * Get cron job status
      * GET /cron/status
      * Requires authentication (for dashboard display)
@@ -236,22 +194,6 @@ class CronController
             return ['status' => 401, 'data' => ['error' => 'Authentication required']];
         }
 
-        // Create table if it doesn't exist (in case cron never ran)
-        try {
-            db()->exec('
-                CREATE TABLE IF NOT EXISTS cron_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_name TEXT NOT NULL,
-                    ran_at TEXT DEFAULT (datetime("now")),
-                    processed INTEGER DEFAULT 0,
-                    skipped INTEGER DEFAULT 0,
-                    errors TEXT,
-                    success INTEGER DEFAULT 1
-                )
-            ');
-        } catch (Exception $e) {
-            // Table might already exist
-        }
 
         // Get last run for each job type
         $stmt = db()->query('
@@ -338,27 +280,18 @@ class CronController
         // 2. Plan is old (generated over 60 days ago)
         // 3. No pending tasks (all completed/skipped, plan may be "half baked")
         // 4. Season changed since plan was generated
-        $today = date('Y-m-d');
-        $month = (int) date('n');
-        if ($month >= 3 && $month <= 5) {
-            $currentSeason = 'spring';
-        } elseif ($month >= 6 && $month <= 8) {
-            $currentSeason = 'summer';
-        } elseif ($month >= 9 && $month <= 11) {
-            $currentSeason = 'fall';
-        } else {
-            $currentSeason = 'winter';
-        }
+        $today = Clock::today();
+        $currentSeason = Clock::season($today);
 
         // Evaluate plants WITH active care plans
         $stmt = db()->query("
             SELECT cp.id as care_plan_id, cp.plant_id, cp.season, cp.valid_until, cp.generated_at,
                    p.user_id, p.name as plant_name,
                    (SELECT COUNT(*) FROM tasks t
-                    WHERE t.care_plan_id = cp.id AND t.completed_at IS NULL AND t.skipped_at IS NULL
+                    WHERE t.plant_id = cp.plant_id AND t.completed_at IS NULL AND t.skipped_at IS NULL
                    ) as pending_task_count,
                    (SELECT COUNT(*) FROM tasks t
-                    WHERE t.care_plan_id = cp.id AND t.task_type = 'check' AND t.completed_at IS NULL AND t.skipped_at IS NULL
+                    WHERE t.plant_id = cp.plant_id AND t.task_type = 'check' AND t.completed_at IS NULL AND t.skipped_at IS NULL
                    ) as pending_check_count
             FROM care_plans cp
             JOIN plants p ON cp.plant_id = p.id
@@ -380,6 +313,7 @@ class CronController
 
         // Generate plans for plants that have none
         foreach ($planlessPlants as $plant) {
+            Clock::useUserTimezone((int) $plant['user_id']);
             try {
                 $carePlanController->generateCarePlan($plant['plant_id'], $plant['user_id']);
                 $regenerated++;
@@ -389,9 +323,16 @@ class CronController
             }
         }
 
+        $disabledByUser = [];
         foreach ($plans as $plan) {
             $shouldRegenerate = false;
             $reason = '';
+            $ownerId = (int) $plan['user_id'];
+            Clock::useUserTimezone($ownerId);
+            $today = Clock::today();
+            $currentSeason = Clock::season($today);
+            $disabledByUser[$ownerId] ??= CareScheduler::disabledTypes($ownerId);
+            $checksOff = in_array('check', $disabledByUser[$ownerId], true);
 
             // 1. Plan expired
             if ($plan['valid_until'] && $plan['valid_until'] < $today) {
@@ -401,7 +342,7 @@ class CronController
 
             // 2. Plan is old (over 60 days)
             if (!$shouldRegenerate && $plan['generated_at']) {
-                $daysSinceGenerated = (strtotime($today) - strtotime($plan['generated_at'])) / 86400;
+                $daysSinceGenerated = Clock::daysBetween(Clock::utcToLocalDate($plan['generated_at']), $today);
                 if ($daysSinceGenerated > 60) {
                     $shouldRegenerate = true;
                     $reason = 'Plan older than 60 days';
@@ -420,8 +361,8 @@ class CronController
                 $reason = "Season changed from {$plan['season']} to {$currentSeason}";
             }
 
-            // 5. Plan is missing check tasks
-            if (!$shouldRegenerate && (int)$plan['pending_check_count'] === 0) {
+            // 5. Plan is missing check tasks (unless the owner turned checks off)
+            if (!$shouldRegenerate && !$checksOff && (int)$plan['pending_check_count'] === 0) {
                 $shouldRegenerate = true;
                 $reason = 'No pending check tasks';
             }
@@ -439,6 +380,7 @@ class CronController
             }
         }
 
+        Clock::useTimezone(null);
         $this->logCronRun('evaluate_plans', $regenerated, $skipped, $errors);
 
         return [
@@ -454,33 +396,15 @@ class CronController
     }
 
     /**
-     * Test endpoint - send a test email to a specific user
-     * GET /cron/test-email?key=SECRET&email=user@example.com
-     * Protected by cron key (for testing via URL)
+     * Send yourself a test reminder email.
+     * GET /cron/test-email (signed-in users only; always goes to your own address)
      */
     public function testEmail(array $params, array $body, ?int $userId): array
     {
-        // Allow either JWT auth OR cron key auth
-        if (!$userId && !$this->validateCronKey($params)) {
+        if (!$userId) {
             return ['status' => 401, 'data' => ['error' => 'Authentication required']];
         }
 
-        // If using cron key, get user by email param
-        if (!$userId) {
-            $email = $_GET['email'] ?? null;
-            if (!$email) {
-                return ['status' => 400, 'data' => ['error' => 'Email parameter required when using key auth']];
-            }
-            $stmt = db()->prepare('SELECT id FROM users WHERE email = ?');
-            $stmt->execute([$email]);
-            $user = $stmt->fetch();
-            if (!$user) {
-                return ['status' => 404, 'data' => ['error' => 'User not found']];
-            }
-            $userId = $user['id'];
-        }
-
-        // Get user email
         $stmt = db()->prepare('SELECT email FROM users WHERE id = ?');
         $stmt->execute([$userId]);
         $user = $stmt->fetch();
@@ -489,35 +413,21 @@ class CronController
             return ['status' => 404, 'data' => ['error' => 'User not found']];
         }
 
-        // Get today's tasks
-        $today = date('Y-m-d');
-        $tasks = $this->getUserTasks($userId, $today);
+        $today = Clock::today();
+        $tasks = (new CareScheduler())->tasksForToday($userId, false);
 
-        // If no tasks, create a sample task for testing
+        // If no tasks, use sample tasks so the email can still be checked
         if (empty($tasks)) {
             $tasks = [
-                [
-                    'id' => 0,
-                    'task_type' => 'water',
-                    'due_date' => $today,
-                    'priority' => 'high',
-                    'plant_name' => 'Sample Plant',
-                    'plant_location' => 'Living Room'
-                ],
-                [
-                    'id' => 0,
-                    'task_type' => 'fertilize',
-                    'due_date' => $today,
-                    'priority' => 'normal',
-                    'plant_name' => 'Another Plant',
-                    'plant_location' => 'Bedroom'
-                ]
+                ['id' => 0, 'task_type' => 'water', 'due_date' => $today, 'priority' => 'high',
+                 'plant_name' => 'Sample Plant', 'plant_location' => 'Living Room'],
+                ['id' => 0, 'task_type' => 'fertilize', 'due_date' => $today, 'priority' => 'normal',
+                 'plant_name' => 'Another Plant', 'plant_location' => 'Bedroom'],
             ];
         }
 
         $userName = ucfirst(explode('@', $user['email'])[0]);
-        $emailService = new EmailService();
-        $result = $emailService->sendDailyReminder($user['email'], $tasks, $userName);
+        $result = (new EmailService())->sendDailyReminder($user['email'], $tasks, $userName);
 
         return [
             'success' => $result,

@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
+import { parseUtc } from '@/utils/dates'
 
 const router = useRouter()
 const api = useApi()
@@ -34,8 +35,9 @@ function getPlantImage(plant) {
 }
 
 function formatDate(dateString) {
-  if (!dateString) return ''
-  return new Date(dateString).toLocaleDateString('en-US', {
+  const date = parseUtc(dateString)
+  if (!date) return ''
+  return date.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'
@@ -51,7 +53,7 @@ function viewPlant(plant) {
   <div class="page-container">
     <!-- Header -->
     <div class="flex items-center gap-3 mb-6">
-      <button @click="router.back()" class="p-2 -ml-2 rounded-xl hover:bg-gray-100">
+      <button type="button" @click="router.back()" class="p-2 -ml-2 rounded-xl hover:bg-gray-100" aria-label="Go back">
         <svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
         </svg>

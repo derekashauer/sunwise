@@ -7,52 +7,51 @@ export default defineConfig({
   plugins: [
     vue(),
     VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      // Our own service worker (src/sw.js) handles offline caching and push.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
+      // The app shows a "new version" toast and reloads when the user taps it,
+      // instead of swapping versions silently (see src/pwa.js).
+      registerType: 'prompt',
+      injectRegister: false,
+      includeAssets: ['favicon.svg', 'icons/apple-touch-icon.png', 'icons/badge-72.png'],
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2,webmanifest}']
+      },
       manifest: {
         name: 'Sunwise Plant Manager',
         short_name: 'Sunwise',
-        description: 'AI-powered personal plant care manager',
-        theme_color: '#22c55e',
-        background_color: '#f0fdf4',
+        description: 'Personal house plant care tracker',
+        theme_color: '#7EB77F',
+        background_color: '#FDF8F3',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
+        scope: '/',
         icons: [
           {
             src: '/icons/icon-192.png',
             sizes: '192x192',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any'
           },
           {
             src: '/icons/icon-512.png',
             sizes: '512x512',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any'
           },
           {
-            src: '/icons/icon-512.png',
+            src: '/icons/maskable-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable'
           }
         ]
       },
-      workbox: {
-        // Disable precaching completely - no files cached by service worker
-        globPatterns: [],
-        // Force network for everything - no caching at all
-        runtimeCaching: [
-          {
-            // ALL requests go to network, never cached
-            urlPattern: /.*/,
-            handler: 'NetworkOnly'
-          }
-        ],
-        // Don't cache anything
-        navigateFallback: null,
-        cleanupOutdatedCaches: true,
-        skipWaiting: true,
-        clientsClaim: true
+      devOptions: {
+        enabled: false
       }
     })
   ],

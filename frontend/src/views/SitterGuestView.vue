@@ -1,6 +1,8 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { getTaskIcon, getTaskOrder } from '@/constants/taskTypes'
+import { parseLocalDate } from '@/utils/dates'
 
 const route = useRoute()
 
@@ -31,14 +33,6 @@ onMounted(async () => {
 const pendingTasks = computed(() => tasks.value.filter(t => !t.completed_at))
 const completedTasks = computed(() => tasks.value.filter(t => t.completed_at))
 
-// Parse 'YYYY-MM-DD' as a LOCAL date — new Date('2026-06-03') parses as UTC
-// midnight, which then renders as the previous day in any timezone west of UTC.
-function parseLocalDate(s) {
-  if (!s) return null
-  const [y, m, d] = s.split('-').map(Number)
-  return new Date(y, m - 1, d)
-}
-
 function formatDate(s, opts = { month: 'short', day: 'numeric' }) {
   const d = parseLocalDate(s)
   return d ? d.toLocaleDateString('en-US', opts) : ''
@@ -57,33 +51,9 @@ function isOverdue(dueDate) {
   return d && d < today
 }
 
-// Task type priority — same order as DashboardView so the sitter sees them
-// in the same order the owner would.
-const taskTypePriority = {
-  water: 1, change_water: 2, mist: 3, fertilize: 4, check: 5,
-  check_roots: 6, rotate: 7, trim: 8, repot: 9, pot_up: 10
-}
-
+// Same order as the owner's Today view, from the shared task type list.
 function getTaskPriority(t) {
-  return taskTypePriority[t] ?? 99
-}
-
-// Doodle icons matching TaskItem.vue
-const taskIcons = {
-  water: 'https://img.icons8.com/doodle/48/watering-can.png',
-  fertilize: 'https://img.icons8.com/doodle/48/nature-care.png',
-  trim: 'https://img.icons8.com/doodle/48/cut.png',
-  repot: 'https://img.icons8.com/doodle/48/potted-plant.png',
-  rotate: 'https://img.icons8.com/doodle/48/rotate.png',
-  mist: 'https://img.icons8.com/doodle/48/splash.png',
-  check: 'https://img.icons8.com/doodle/48/visible--v1.png',
-  change_water: 'https://img.icons8.com/doodle/48/water.png',
-  check_roots: 'https://img.icons8.com/doodle/48/soil.png',
-  pot_up: 'https://img.icons8.com/doodle/48/potted-plant.png'
-}
-
-function getTaskIcon(taskType) {
-  return taskIcons[taskType] || 'https://img.icons8.com/doodle/48/todo-list.png'
+  return getTaskOrder(t)
 }
 
 // Group items by location, "Unassigned" last; tasks within a location sort by type priority
@@ -243,13 +213,13 @@ function openLightbox(src, alt) {
                   <img :src="`/uploads/plants/${task.plant_thumbnail}`" :alt="task.plant_name" class="w-full h-full object-cover">
                 </button>
                 <div v-else class="w-20 h-20 rounded-xl bg-cream-200 flex items-center justify-center flex-shrink-0">
-                  <img :src="getTaskIcon(task.task_type)" :alt="task.task_type" class="w-10 h-10">
+                  <img :src="getTaskIcon(task.task_type)" alt="" class="w-10 h-10">
                 </div>
 
                 <!-- Task info -->
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
-                    <img :src="getTaskIcon(task.task_type)" :alt="task.task_type" class="w-5 h-5">
+                    <img :src="getTaskIcon(task.task_type)" alt="" class="w-5 h-5">
                     <span class="font-semibold text-charcoal-600 capitalize text-sm">{{ task.task_type.replace('_', ' ') }}</span>
                     <span
                       v-if="task.priority === 'urgent' || task.priority === 'high'"
@@ -294,7 +264,7 @@ function openLightbox(src, alt) {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
               </svg>
             </div>
-            <img :src="getTaskIcon(task.task_type)" :alt="task.task_type" class="w-5 h-5">
+            <img :src="getTaskIcon(task.task_type)" alt="" class="w-5 h-5">
             <span class="font-semibold text-charcoal-600 capitalize text-sm">{{ task.task_type.replace('_', ' ') }}</span>
             <span class="text-sm text-charcoal-400">· {{ task.plant_name }}</span>
           </div>

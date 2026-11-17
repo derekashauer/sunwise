@@ -4,13 +4,13 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useApi } from '@/composables/useApi'
 import { APP_VERSION } from '@/config'
+import CareSettings from '@/components/settings/CareSettings.vue'
+import PushSettings from '@/components/settings/PushSettings.vue'
+import { formatTimeAgo, parseUtc } from '@/utils/dates'
 
 const router = useRouter()
 const auth = useAuthStore()
 const api = useApi()
-
-const notificationsEnabled = ref(false)
-const notificationsLoading = ref(false)
 
 // AI Settings
 const aiSettings = ref(null)
@@ -60,9 +60,6 @@ const showAiLog = ref(false)
 const testingConnection = ref(false)
 
 onMounted(async () => {
-  if ('Notification' in window && Notification.permission === 'granted') {
-    notificationsEnabled.value = true
-  }
   await Promise.all([
     loadAiSettings(),
     loadNotificationSettings(),
@@ -170,16 +167,15 @@ function formatAiAction(action) {
   return actions[action] || action
 }
 
+// AI log timestamps are UTC from the database.
 function formatRelativeTime(dateStr) {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diff = Math.floor((now - date) / 1000)
-
-  if (diff < 60) return 'Just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return date.toLocaleDateString()
+  return formatTimeAgo(dateStr)
 }
+
+const memberSince = computed(() => {
+  const date = parseUtc(auth.user?.created_at)
+  return date ? date.toLocaleDateString() : ''
+})
 
 async function toggleTaskType(taskType) {
   const task = taskTypes.value.find(t => t.type === taskType)
@@ -197,41 +193,6 @@ async function toggleTaskType(taskType) {
     window.$toast?.error('Failed to update task type')
   } finally {
     savingTaskTypes.value = false
-  }
-}
-
-async function toggleNotifications() {
-  if (notificationsEnabled.value) {
-    window.$toast?.info('Disable notifications in your browser settings')
-    return
-  }
-
-  // Check if notifications are supported
-  if (!('Notification' in window)) {
-    window.$toast?.error('Notifications not supported on this device/browser')
-    return
-  }
-
-  // Check if already denied
-  if (Notification.permission === 'denied') {
-    window.$toast?.error('Notifications were previously blocked. Enable in browser settings.')
-    return
-  }
-
-  notificationsLoading.value = true
-  try {
-    const permission = await Notification.requestPermission()
-    if (permission === 'granted') {
-      notificationsEnabled.value = true
-      window.$toast?.success('Notifications enabled!')
-    } else {
-      window.$toast?.error('Notifications permission denied')
-    }
-  } catch (e) {
-    console.error('Notification error:', e)
-    window.$toast?.error('Failed to enable notifications: ' + (e.message || 'Unknown error'))
-  } finally {
-    notificationsLoading.value = false
   }
 }
 
@@ -431,7 +392,7 @@ const galleryUrl = computed(() => {
         </div>
         <div>
           <p class="font-medium text-charcoal-700">{{ auth.user?.email }}</p>
-          <p class="text-sm text-charcoal-400">Member since {{ new Date(auth.user?.created_at).toLocaleDateString() }}</p>
+          <p v-if="memberSince" class="text-sm text-charcoal-400">Member since {{ memberSince }}</p>
         </div>
       </div>
     </div>
@@ -588,7 +549,7 @@ const galleryUrl = computed(() => {
           <div class="flex items-center justify-between mb-2">
             <div>
               <p class="font-medium text-charcoal-700">OpenAI API Key</p>
-              <p class="text-xs text-charcoal-400">For GPT-4o models</p>
+              <p class="text-xs text-charcoal-400">For OpenAI models</p>
             </div>
             <span
               v-if="aiSettings?.has_openai_key"
@@ -649,7 +610,7 @@ const galleryUrl = computed(() => {
           <div class="flex items-center justify-between mb-2">
             <div>
               <p class="font-medium text-charcoal-700">Claude API Key</p>
-              <p class="text-xs text-charcoal-400">For Claude Opus 4.5</p>
+              <p class="text-xs text-charcoal-400">For Claude models</p>
             </div>
             <span
               v-if="aiSettings?.has_claude_key"
@@ -787,6 +748,9 @@ const galleryUrl = computed(() => {
       </div>
     </div>
 
+    <!-- Plant care: time zone, climate, fertilizer -->
+    <CareSettings />
+
     <!-- Task Types -->
     <div class="card p-4 mb-6">
       <h2 class="font-hand text-xl text-charcoal-700 mb-1 flex items-center gap-2">
@@ -828,31 +792,8 @@ const galleryUrl = computed(() => {
       </p>
     </div>
 
-    <!-- Push Notifications -->
-    <div class="card p-4 mb-6">
-      <h2 class="font-hand text-xl text-charcoal-700 mb-3 flex items-center gap-2">
-        <img src="https://img.icons8.com/doodle/48/alarm.png" alt="" class="w-6 h-6">
-        Push Notifications
-      </h2>
-
-      <div class="flex items-center justify-between">
-        <div>
-          <p class="font-medium text-charcoal-700">Browser Notifications</p>
-          <p class="text-sm text-charcoal-400">Get reminders for plant care tasks</p>
-        </div>
-        <button
-          @click="toggleNotifications"
-          :disabled="notificationsLoading"
-          class="relative w-12 h-7 rounded-full transition-colors"
-          :class="notificationsEnabled ? 'bg-sage-500' : 'bg-charcoal-200'"
-        >
-          <span
-            class="absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform"
-            :class="notificationsEnabled ? 'left-6' : 'left-1'"
-          ></span>
-        </button>
-      </div>
-    </div>
+    <!-- Push reminders -->
+    <PushSettings />
 
     <!-- Email Digest -->
     <div class="card p-4 mb-6">

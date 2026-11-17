@@ -1,126 +1,48 @@
 <?php
 /**
  * Task Controller
+ *
+ * HTTP layer for care tasks. Scheduling rules live in CareScheduler so every
+ * path (owner, bulk, sitter, care log, email) follows the same rules.
  */
 
 class TaskController
 {
-    /**
-     * Get SQL condition for plants user can access (owned + shared via household)
-     */
-    private function getAccessiblePlantCondition(int $userId): string
-    {
-        $stmt = db()->prepare('SELECT household_id FROM household_members WHERE user_id = ?');
-        $stmt->execute([$userId]);
-        $households = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    private CareScheduler $scheduler;
 
-        if (empty($households)) {
-            return "p.user_id = {$userId}";
+    public function __construct()
+    {
+        $this->scheduler = new CareScheduler();
+    }
+
+    /**
+     * Load a task the user may act on, or null.
+     */
+    private function findAccessibleTask($taskId, int $userId): ?array
+    {
+        $task = CareScheduler::loadTask((int) $taskId);
+        if (!$task || !CareScheduler::canAccessPlant((int) $task['plant_id'], $userId)) {
+            return null;
         }
-
-        $householdList = implode(',', array_map('intval', $households));
-        return "(p.user_id = {$userId} OR p.id IN (SELECT plant_id FROM household_plants WHERE household_id IN ({$householdList})))";
+        return $task;
     }
 
-    /**
-     * Check if user can access a specific plant (owns it or has household access)
-     */
-    private function canAccessPlant(int $plantId, int $userId): bool
+    private function notFound(): array
     {
-        // Check ownership
-        $stmt = db()->prepare('SELECT user_id FROM plants WHERE id = ?');
-        $stmt->execute([$plantId]);
-        $plant = $stmt->fetch();
-
-        if (!$plant) return false;
-        if ($plant['user_id'] == $userId) return true;
-
-        // Check household access
-        $stmt = db()->prepare('
-            SELECT 1 FROM household_plants hp
-            JOIN household_members hm ON hp.household_id = hm.household_id
-            WHERE hp.plant_id = ? AND hm.user_id = ?
-        ');
-        $stmt->execute([$plantId, $userId]);
-        return (bool)$stmt->fetch();
+        return ['status' => 404, 'data' => ['error' => 'Task not found']];
     }
 
     /**
-     * Get disabled task types for a user
-     */
-    private function getDisabledTaskTypes(int $userId): array
-    {
-        $stmt = db()->prepare('SELECT task_type FROM task_type_settings WHERE user_id = ? AND enabled = 0');
-        $stmt->execute([$userId]);
-        return $stmt->fetchAll(PDO::FETCH_COLUMN);
-    }
-
-    /**
-     * Build SQL exclusion clause for disabled task types
-     */
-    private function getDisabledTaskTypeCondition(int $userId): string
-    {
-        $disabled = $this->getDisabledTaskTypes($userId);
-        if (empty($disabled)) {
-            return '1=1';
-        }
-        $quoted = implode(',', array_map(fn($t) => "'" . addslashes($t) . "'", $disabled));
-        return "t.task_type NOT IN ({$quoted})";
-    }
-
-    /**
-     * Get today's tasks
+     * Get today's tasks (due today or late), plus tasks finished today.
      */
     public function today(array $params, array $body, ?int $userId): array
     {
-        $today = date('Y-m-d');
-        $accessCondition = $this->getAccessiblePlantCondition($userId);
-        $taskTypeCondition = $this->getDisabledTaskTypeCondition($userId);
+        $this->scheduler->reconcile($userId);
 
-        // Daily reconciliation: if a plant has a pending water/fertilize task AND was
-        // recently watered/fertilized (via care_log), skip the task if it's too soon
-        $this->reconcileOverdueTasks($userId, $accessCondition);
-
-        // Location lives in the `locations` table via location_id; the legacy
-        // p.location text column is empty for plants organized after structured
-        // locations were introduced. Fall back to it for unmigrated legacy plants.
-        $stmt = db()->query("
-            SELECT t.*,
-                   p.name as plant_name,
-                   COALESCE(l.name, p.location) as plant_location,
-                   p.species as plant_species,
-                   p.light_condition as plant_light_condition,
-                   CAST(COALESCE(p.is_propagation, 0) AS INTEGER) as plant_is_propagation,
-                   p.soil_type as plant_soil_type,
-                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail,
-                   CASE WHEN p.user_id = {$userId} THEN 1 ELSE 0 END as is_owned,
-                   CASE WHEN t.completed_by_user_id IS NOT NULL THEN
-                       (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1))
-                        FROM users u WHERE u.id = t.completed_by_user_id)
-                   ELSE NULL END as completed_by_name
-            FROM tasks t
-            JOIN plants p ON t.plant_id = p.id
-            LEFT JOIN locations l ON p.location_id = l.id
-            WHERE {$accessCondition}
-              AND t.due_date <= '{$today}'
-              AND t.skipped_at IS NULL
-              AND p.archived_at IS NULL
-              AND {$taskTypeCondition}
-            ORDER BY
-                CASE WHEN t.completed_at IS NULL THEN 0 ELSE 1 END,
-                CASE t.priority
-                    WHEN 'urgent' THEN 1
-                    WHEN 'high' THEN 2
-                    WHEN 'normal' THEN 3
-                    WHEN 'low' THEN 4
-                    ELSE 5
-                END,
-                t.due_date ASC
-        ");
-
-        $tasks = $stmt->fetchAll();
-
-        return ['tasks' => $tasks];
+        return [
+            'tasks' => $this->scheduler->tasksForToday($userId, true),
+            'today' => Clock::today(),
+        ];
     }
 
     /**
@@ -128,34 +50,45 @@ class TaskController
      */
     public function upcoming(array $params, array $body, ?int $userId): array
     {
-        $today = date('Y-m-d');
-        $endDate = date('Y-m-d', strtotime('+7 days'));
-        $accessCondition = $this->getAccessiblePlantCondition($userId);
-        $taskTypeCondition = $this->getDisabledTaskTypeCondition($userId);
+        $today = Clock::today();
+        $endDate = Clock::addDays($today, 7);
+        $access = CareScheduler::accessiblePlantCondition($userId);
+        $disabled = CareScheduler::disabledTypes($userId);
 
-        // See today() — location comes from `locations` via location_id, with the
-        // legacy p.location text column as a fallback for unmigrated plants.
-        $stmt = db()->query("
+        $params = [(int) $userId, $today, $endDate];
+        $typeClause = '';
+        if (!empty($disabled)) {
+            $typeClause = ' AND t.task_type NOT IN (' . implode(',', array_fill(0, count($disabled), '?')) . ')';
+            $params = array_merge($params, $disabled);
+        }
+
+        $stmt = db()->prepare("
             SELECT t.*,
-                   p.name as plant_name,
-                   COALESCE(l.name, p.location) as plant_location,
-                   p.species as species,
-                   p.pot_size as pot_size,
-                   p.soil_type as soil_type,
-                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) as plant_thumbnail,
-                   CASE WHEN p.user_id = {$userId} THEN 1 ELSE 0 END as is_owned
+                   p.name AS plant_name,
+                   COALESCE(l.name, p.location) AS plant_location,
+                   p.species AS species,
+                   p.pot_size AS pot_size,
+                   p.soil_type AS soil_type,
+                   (SELECT filename FROM photos WHERE plant_id = p.id ORDER BY uploaded_at DESC LIMIT 1) AS plant_thumbnail,
+                   CASE WHEN p.user_id = ? THEN 1 ELSE 0 END AS is_owned,
+                   (SELECT MAX(cl.performed_at) FROM care_log cl
+                    WHERE cl.plant_id = t.plant_id AND cl.action = t.task_type) AS last_done_at
             FROM tasks t
             JOIN plants p ON t.plant_id = p.id
             LEFT JOIN locations l ON p.location_id = l.id
-            WHERE {$accessCondition}
-              AND t.due_date BETWEEN '{$today}' AND '{$endDate}'
+            WHERE {$access}
+              AND t.due_date BETWEEN ? AND ?
               AND t.completed_at IS NULL
               AND t.skipped_at IS NULL
-              AND {$taskTypeCondition}
-            ORDER BY t.due_date ASC, t.priority ASC
+              AND p.archived_at IS NULL
+              {$typeClause}
+            ORDER BY t.due_date ASC,
+                CASE t.priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 WHEN 'low' THEN 4 ELSE 5 END
         ");
+        $stmt->execute($params);
 
-        return ['tasks' => $stmt->fetchAll()];
+        $tasks = array_map(fn($t) => $this->scheduler->decorate($t, $today), $stmt->fetchAll());
+        return ['tasks' => $tasks];
     }
 
     /**
@@ -163,108 +96,332 @@ class TaskController
      */
     public function forPlant(array $params, array $body, ?int $userId): array
     {
-        $plantId = $params['id'];
+        $plantId = (int) $params['id'];
 
-        // Verify plant access (owned or shared via household)
-        if (!$this->canAccessPlant($plantId, $userId)) {
+        if (!CareScheduler::canAccessPlant($plantId, $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
         }
 
-        $taskTypeCondition = $this->getDisabledTaskTypeCondition($userId);
+        $disabled = CareScheduler::disabledTypes($userId);
+        $values = [$plantId];
+        $typeClause = '';
+        if (!empty($disabled)) {
+            $typeClause = ' AND t.task_type NOT IN (' . implode(',', array_fill(0, count($disabled), '?')) . ')';
+            $values = array_merge($values, $disabled);
+        }
 
         $stmt = db()->prepare("
             SELECT t.*,
                    CASE WHEN t.completed_by_user_id IS NOT NULL THEN
                        (SELECT COALESCE(u.display_name, SUBSTR(u.email, 1, INSTR(u.email, '@') - 1))
                         FROM users u WHERE u.id = t.completed_by_user_id)
-                   ELSE NULL END as completed_by_name
+                   ELSE NULL END AS completed_by_name,
+                   (SELECT MAX(cl.performed_at) FROM care_log cl
+                    WHERE cl.plant_id = t.plant_id AND cl.action = t.task_type) AS last_done_at
             FROM tasks t
             WHERE t.plant_id = ?
               AND t.skipped_at IS NULL
-              AND {$taskTypeCondition}
+              {$typeClause}
             ORDER BY
                 CASE WHEN t.completed_at IS NULL THEN 0 ELSE 1 END,
-                t.due_date ASC
+                CASE WHEN t.completed_at IS NULL THEN t.due_date END ASC,
+                t.completed_at DESC
             LIMIT 20
         ");
-        $stmt->execute([$plantId]);
+        $stmt->execute($values);
 
-        return ['tasks' => $stmt->fetchAll()];
+        $today = Clock::today();
+        $tasks = array_map(fn($t) => $this->scheduler->decorate($t, $today), $stmt->fetchAll());
+        return ['tasks' => $tasks];
     }
 
     /**
-     * Complete a task
+     * Complete a task. Calling it twice is harmless.
      */
     public function complete(array $params, array $body, ?int $userId): array
     {
-        $taskId = $params['id'];
-        $notes = $body['notes'] ?? null;
-        $checkData = $body['check_data'] ?? null;
-
-        // Get task details
-        $stmt = db()->prepare('
-            SELECT t.*, p.user_id as owner_id
-            FROM tasks t
-            JOIN plants p ON t.plant_id = p.id
-            WHERE t.id = ?
-        ');
-        $stmt->execute([$taskId]);
-        $task = $stmt->fetch();
-
+        $task = $this->findAccessibleTask($params['id'], $userId);
         if (!$task) {
-            return ['status' => 404, 'data' => ['error' => 'Task not found']];
+            return $this->notFound();
         }
 
-        // Verify access (owned or shared via household)
-        if (!$this->canAccessPlant($task['plant_id'], $userId)) {
-            return ['status' => 404, 'data' => ['error' => 'Task not found']];
-        }
+        $notes = isset($body['notes']) && trim((string) $body['notes']) !== '' ? trim((string) $body['notes']) : null;
+        $checkData = isset($body['check_data']) && is_array($body['check_data']) ? $body['check_data'] : null;
+        $alreadyDone = !empty($task['completed_at']);
 
-        // Mark as completed with attribution
-        $stmt = db()->prepare('UPDATE tasks SET completed_at = datetime("now"), notes = ?, completed_by_user_id = ? WHERE id = ?');
-        $stmt->execute([$notes, $userId, $taskId]);
+        $updatedTask = $this->scheduler->complete($task, $userId, $notes, $checkData);
 
-        // Log to care log with performer attribution and check data
-        $checkDataJson = $checkData ? json_encode($checkData) : null;
-        $stmt = db()->prepare('
-            INSERT INTO care_log (plant_id, task_id, action, notes, performed_by_user_id, check_data)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ');
-        $stmt->execute([
-            $task['plant_id'],
-            $taskId,
-            $task['task_type'],
-            $notes,
-            $userId,
-            $checkDataJson
-        ]);
+        $response = ['task' => $this->scheduler->decorate($updatedTask)];
 
-        $this->runCompletionSideEffects($task);
-
-        // Get updated task
-        $stmt = db()->prepare('SELECT * FROM tasks WHERE id = ?');
-        $stmt->execute([$taskId]);
-        $updatedTask = $stmt->fetch();
-
-        // Analyze check data if this is a check task
-        $insights = [];
-        $carePlanUpdated = false;
-        if ($task['task_type'] === 'check' && $checkData) {
-            $analysisResult = $this->analyzeCheckDataAndUpdateCarePlan($checkData, $task['plant_id'], $userId);
-            $insights = $analysisResult['insights'];
-            $carePlanUpdated = $analysisResult['care_plan_updated'];
-        }
-
-        $response = ['task' => $updatedTask];
-        if (!empty($insights)) {
-            $response['insights'] = $insights;
-        }
-        if ($carePlanUpdated) {
-            $response['care_plan_updated'] = true;
+        // Analyze check data if this is a fresh check completion
+        if (!$alreadyDone && $task['task_type'] === 'check' && $checkData) {
+            $analysis = $this->analyzeCheckDataAndUpdateCarePlan($checkData, (int) $task['plant_id'], $userId);
+            if (!empty($analysis['insights'])) {
+                $response['insights'] = $analysis['insights'];
+            }
+            if ($analysis['care_plan_updated']) {
+                $response['care_plan_updated'] = true;
+            }
         }
 
         return $response;
     }
+
+    /**
+     * Undo a completion.
+     */
+    public function uncomplete(array $params, array $body, ?int $userId): array
+    {
+        $task = $this->findAccessibleTask($params['id'], $userId);
+        if (!$task) {
+            return $this->notFound();
+        }
+
+        $task = $this->scheduler->uncomplete($task);
+        return ['task' => $this->scheduler->decorate($task)];
+    }
+
+    /**
+     * Complete several tasks at once. Check tasks are left out so their
+     * moisture and health readings are always recorded through the check form.
+     */
+    public function bulkComplete(array $params, array $body, ?int $userId): array
+    {
+        $taskIds = $body['task_ids'] ?? [];
+        $notes = isset($body['notes']) && trim((string) $body['notes']) !== '' ? trim((string) $body['notes']) : null;
+
+        if (empty($taskIds) || !is_array($taskIds)) {
+            return ['status' => 400, 'data' => ['error' => 'No task IDs provided']];
+        }
+
+        $completed = [];
+        $failed = [];
+        $skippedCheck = [];
+
+        foreach (array_slice($taskIds, 0, 50) as $taskId) {
+            $task = $this->findAccessibleTask($taskId, $userId);
+            if (!$task) {
+                $failed[] = $taskId;
+                continue;
+            }
+            if ($task['task_type'] === 'check' && empty($task['completed_at'])) {
+                $skippedCheck[] = (int) $task['id'];
+                continue;
+            }
+            $this->scheduler->complete($task, $userId, $notes);
+            $completed[] = (int) $task['id'];
+        }
+
+        return [
+            'completed' => $completed,
+            'failed' => $failed,
+            'skipped_check' => $skippedCheck,
+            'count' => count($completed),
+        ];
+    }
+
+    /**
+     * Undo several completions (the "Undo" after Complete all).
+     */
+    public function bulkUncomplete(array $params, array $body, ?int $userId): array
+    {
+        $taskIds = $body['task_ids'] ?? [];
+        if (empty($taskIds) || !is_array($taskIds)) {
+            return ['status' => 400, 'data' => ['error' => 'No task IDs provided']];
+        }
+
+        $uncompleted = [];
+        $failed = [];
+        foreach (array_slice($taskIds, 0, 50) as $taskId) {
+            $task = $this->findAccessibleTask($taskId, $userId);
+            if (!$task) {
+                $failed[] = $taskId;
+                continue;
+            }
+            $this->scheduler->uncomplete($task);
+            $uncompleted[] = (int) $task['id'];
+        }
+
+        return ['uncompleted' => $uncompleted, 'failed' => $failed, 'count' => count($uncompleted)];
+    }
+
+    /**
+     * Skip several tasks at once. They come back after the same short delay
+     * as a single skip.
+     */
+    public function bulkSkip(array $params, array $body, ?int $userId): array
+    {
+        $taskIds = $body['task_ids'] ?? [];
+        $reason = $body['reason'] ?? null;
+
+        if (empty($taskIds) || !is_array($taskIds)) {
+            return ['status' => 400, 'data' => ['error' => 'No task IDs provided']];
+        }
+
+        $skipped = [];
+        $failed = [];
+
+        foreach (array_slice($taskIds, 0, 50) as $taskId) {
+            $task = $this->findAccessibleTask($taskId, $userId);
+            if (!$task) {
+                $failed[] = $taskId;
+                continue;
+            }
+            $this->scheduler->skip($task, $userId, $reason, 'skip');
+            $skipped[] = (int) $task['id'];
+        }
+
+        return ['skipped' => $skipped, 'failed' => $failed, 'count' => count($skipped)];
+    }
+
+    /**
+     * Skip a task. It comes back after a short, type-based delay.
+     */
+    public function skip(array $params, array $body, ?int $userId): array
+    {
+        $task = $this->findAccessibleTask($params['id'], $userId);
+        if (!$task) {
+            return $this->notFound();
+        }
+
+        $this->scheduler->skip($task, $userId, $body['reason'] ?? null, 'skip');
+
+        return ['task' => CareScheduler::loadTask((int) $task['id'])];
+    }
+
+    /**
+     * Move a task to another day: { days: 1-30 } or { date: "YYYY-MM-DD" }.
+     */
+    public function snooze(array $params, array $body, ?int $userId): array
+    {
+        $task = $this->findAccessibleTask($params['id'], $userId);
+        if (!$task) {
+            return $this->notFound();
+        }
+        if (!empty($task['completed_at']) || !empty($task['skipped_at'])) {
+            return ['status' => 400, 'data' => ['error' => 'Only pending tasks can be snoozed']];
+        }
+
+        $today = Clock::today();
+        if (!empty($body['date'])) {
+            $date = (string) $body['date'];
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !strtotime($date)) {
+                return ['status' => 400, 'data' => ['error' => 'Pick a valid date']];
+            }
+            if ($date <= $today) {
+                return ['status' => 400, 'data' => ['error' => 'Pick a day after today']];
+            }
+            if (Clock::daysBetween($today, $date) > 60) {
+                return ['status' => 400, 'data' => ['error' => 'Snooze up to 60 days at a time']];
+            }
+        } else {
+            $days = (int) ($body['days'] ?? 1);
+            if ($days < 1 || $days > 30) {
+                return ['status' => 400, 'data' => ['error' => 'Snooze between 1 and 30 days']];
+            }
+            $date = Clock::addDays($today, $days);
+        }
+
+        $task = $this->scheduler->snooze($task, $date);
+        return ['task' => $this->scheduler->decorate($task)];
+    }
+
+    /**
+     * Thin wrapper kept for callers outside this class.
+     */
+    public function runCompletionSideEffects(array $task): void
+    {
+        $this->scheduler->runCompletionSideEffects($task);
+    }
+
+    /**
+     * How long to hold off watering after a check finds wet soil.
+     * 7/10 waits about a third of the interval, 8/10 about half, 9-10 most of it.
+     */
+    public static function wetSoilDelay(int $moisture, int $interval): int
+    {
+        if ($moisture >= 9) {
+            return max(3, (int) round($interval * 0.7));
+        }
+        if ($moisture >= 8) {
+            return max(2, (int) round($interval * 0.5));
+        }
+        return max(2, (int) round($interval * 0.35));
+    }
+
+    /**
+     * Adjust the water task from a check's moisture reading, and rebuild the
+     * care plan only when health is poor or pests showed up.
+     */
+    private function analyzeCheckDataAndUpdateCarePlan(array $checkData, int $plantId, int $userId): array
+    {
+        $insights = $this->analyzeCheckData($checkData, $plantId, $userId);
+        $carePlanUpdated = false;
+
+        $moisture = isset($checkData['moisture_level']) ? (int) $checkData['moisture_level'] : null;
+        $health = isset($checkData['general_health']) ? (int) $checkData['general_health'] : 3;
+        $today = Clock::today();
+
+        // Poor health or pests: ask for a fresh care plan first, so the
+        // moisture adjustments below apply to the new water task
+        if ($health <= 2 || !empty($checkData['pests_observed'])) {
+            try {
+                (new CarePlanController())->generateCarePlan($plantId, $userId);
+                $carePlanUpdated = true;
+
+                if (!$this->hasInsightType($insights, 'warning') && !$this->hasInsightType($insights, 'urgent')) {
+                    $insights[] = [
+                        'type' => 'info',
+                        'message' => 'Care plan has been automatically updated based on your check data.',
+                        'suggestion' => ['action' => 'none', 'details' => null],
+                    ];
+                }
+            } catch (Exception $e) {
+                error_log('Auto care plan update failed: ' . $e->getMessage());
+            }
+        }
+
+        $stmt = db()->prepare('
+            SELECT id FROM tasks
+            WHERE plant_id = ? AND task_type = "water" AND completed_at IS NULL AND skipped_at IS NULL
+            ORDER BY due_date ASC LIMIT 1
+        ');
+        $stmt->execute([$plantId]);
+        $waterId = $stmt->fetchColumn();
+        $water = $waterId ? CareScheduler::loadTask((int) $waterId) : null;
+
+        if ($water && $moisture !== null) {
+            $daysUntil = Clock::daysBetween($today, $water['due_date']);
+            $interval = $this->scheduler->intervalFor($water) ?: 7;
+
+            if ($moisture <= 2 && $daysUntil >= 2) {
+                // Bone dry and watering is days away: water today instead
+                $this->scheduler->snooze($water, $today);
+                $insights[] = [
+                    'type' => 'warning',
+                    'message' => "Soil is very dry ({$moisture}/10), so watering moved to today instead of in {$daysUntil} days.",
+                ];
+            } elseif ($moisture >= 7) {
+                $delay = self::wetSoilDelay($moisture, $interval);
+                if ($daysUntil <= 0) {
+                    $this->scheduler->skip($water, $userId, "Auto-skipped: check reported wet soil ({$moisture}/10)", 'skip', $delay);
+                    $insights[] = [
+                        'type' => 'info',
+                        'message' => "Soil is still wet ({$moisture}/10), so today's watering was skipped. Next watering in {$delay} days.",
+                    ];
+                } elseif ($daysUntil < $delay) {
+                    $this->scheduler->snooze($water, Clock::addDays($today, $delay));
+                    $insights[] = [
+                        'type' => 'info',
+                        'message' => "Soil is still wet ({$moisture}/10), so watering moved out to {$delay} days from now.",
+                    ];
+                }
+            }
+        }
+
+        return ['insights' => $insights, 'care_plan_updated' => $carePlanUpdated];
+    }
+
 
     /**
      * Analyze check data for concerning patterns
@@ -290,7 +447,7 @@ class TaskController
         }
 
         // Low health rating - warning
-        $health = $checkData['general_health'] ?? 5;
+        $health = (int) ($checkData['general_health'] ?? 5);
         if ($health <= 2) {
             $insights[] = ['type' => 'warning', 'message' => 'Plant health is poor. Consider reviewing care routine and environment.'];
             $triggerAI = true;
@@ -300,7 +457,7 @@ class TaskController
         }
 
         // Moisture extremes
-        $moisture = $checkData['moisture_level'] ?? 5;
+        $moisture = (int) ($checkData['moisture_level'] ?? 5);
         if ($moisture <= 2) {
             $insights[] = ['type' => 'info', 'message' => 'Soil is very dry. May need watering soon.'];
             $concernCount++;
@@ -344,126 +501,6 @@ class TaskController
         }
 
         return $insights;
-    }
-
-    /**
-     * Analyze check data and potentially trigger care plan update
-     * This wraps analyzeCheckData and adds care plan regeneration logic
-     */
-    private function analyzeCheckDataAndUpdateCarePlan(array $checkData, int $plantId, int $userId): array
-    {
-        $insights = $this->analyzeCheckData($checkData, $plantId, $userId);
-        $carePlanUpdated = false;
-
-        // Determine if the care plan should be updated based on check data
-        $shouldUpdatePlan = false;
-
-        $moisture = $checkData['moisture_level'] ?? null;
-        $health = $checkData['general_health'] ?? 3;
-
-        // Very dry soil (moisture <= 2) - may need more frequent watering
-        if ($moisture !== null && $moisture <= 2) {
-            // Check if next water task is far away
-            $stmt = db()->prepare('
-                SELECT due_date FROM tasks
-                WHERE plant_id = ? AND task_type = "water" AND completed_at IS NULL AND skipped_at IS NULL
-                ORDER BY due_date ASC LIMIT 1
-            ');
-            $stmt->execute([$plantId]);
-            $nextWater = $stmt->fetch();
-
-            if ($nextWater) {
-                $daysUntilWater = (strtotime($nextWater['due_date']) - strtotime('today')) / 86400;
-                // If soil is bone dry and watering is 3+ days away, update plan
-                if ($daysUntilWater >= 3) {
-                    $shouldUpdatePlan = true;
-                    $insights[] = [
-                        'type' => 'warning',
-                        'message' => "Soil is very dry but next watering isn't for {$daysUntilWater} days. Regenerating care plan to adjust watering frequency.",
-                        'suggestion' => ['action' => 'adjust_watering', 'details' => 'Care plan will be updated with more frequent watering']
-                    ];
-                }
-            }
-        }
-
-        // Wet soil (moisture >= 7) - auto-skip today's water task if one exists
-        if ($moisture !== null && $moisture >= 7) {
-            $today = date('Y-m-d');
-            $stmt = db()->prepare('
-                SELECT id, plant_id, task_type, due_date, recurrence, care_plan_id, instructions, priority
-                FROM tasks
-                WHERE plant_id = ? AND task_type = "water"
-                  AND due_date <= ? AND completed_at IS NULL AND skipped_at IS NULL
-                LIMIT 1
-            ');
-            $stmt->execute([$plantId, $today]);
-            $todayWater = $stmt->fetch();
-
-            if ($todayWater) {
-                // Auto-skip the water task
-                $stmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
-                $stmt->execute(['Auto-skipped: check reported high moisture (' . $moisture . '/10)', $todayWater['id']]);
-
-                // Generate next occurrence so the schedule continues (use skip mode for shorter delay)
-                if ($todayWater['recurrence']) {
-                    $this->generateNextOccurrence($todayWater, 'skip');
-                }
-
-                $insights[] = [
-                    'type' => 'info',
-                    'message' => 'Soil moisture is high (' . $moisture . '/10). Today\'s watering task has been automatically skipped.'
-                ];
-            }
-
-            // Very wet (>= 9) and next watering is soon - consider plan update
-            if ($moisture >= 9) {
-                $stmt = db()->prepare('
-                    SELECT due_date FROM tasks
-                    WHERE plant_id = ? AND task_type = "water" AND completed_at IS NULL AND skipped_at IS NULL
-                    ORDER BY due_date ASC LIMIT 1
-                ');
-                $stmt->execute([$plantId]);
-                $nextWater = $stmt->fetch();
-
-                if ($nextWater) {
-                    $daysUntilWater = (strtotime($nextWater['due_date']) - strtotime('today')) / 86400;
-                    if ($daysUntilWater <= 2) {
-                        $shouldUpdatePlan = true;
-                        $insights[] = [
-                            'type' => 'warning',
-                            'message' => 'Soil is very wet and watering is scheduled soon. Regenerating care plan to reduce watering frequency.',
-                            'suggestion' => ['action' => 'adjust_watering', 'details' => 'Care plan will be updated with less frequent watering']
-                        ];
-                    }
-                }
-            }
-        }
-
-        // Critical health (health <= 2) or pests - always review care plan
-        if ($health <= 2 || !empty($checkData['pests_observed'])) {
-            $shouldUpdatePlan = true;
-        }
-
-        // Trigger care plan regeneration
-        if ($shouldUpdatePlan) {
-            try {
-                $carePlanController = new CarePlanController();
-                $carePlanController->generateCarePlan($plantId, $userId);
-                $carePlanUpdated = true;
-
-                if (!$this->hasInsightType($insights, 'warning') && !$this->hasInsightType($insights, 'urgent')) {
-                    $insights[] = [
-                        'type' => 'info',
-                        'message' => 'Care plan has been automatically updated based on your check data.',
-                        'suggestion' => ['action' => 'none', 'details' => null]
-                    ];
-                }
-            } catch (Exception $e) {
-                error_log('Auto care plan update failed: ' . $e->getMessage());
-            }
-        }
-
-        return ['insights' => $insights, 'care_plan_updated' => $carePlanUpdated];
     }
 
     /**
@@ -518,7 +555,7 @@ class TaskController
         $stmt = db()->prepare('
             SELECT task_type, due_date, recurrence
             FROM tasks
-            WHERE plant_id = ? AND completed_at IS NULL
+            WHERE plant_id = ? AND completed_at IS NULL AND skipped_at IS NULL
             ORDER BY due_date
             LIMIT 10
         ');
@@ -528,7 +565,7 @@ class TaskController
         // Extract recurrence_interval from JSON recurrence field
         $currentTasks = [];
         foreach ($rawTasks as $task) {
-            $recurrence = json_decode($task['recurrence'], true);
+            $recurrence = json_decode($task['recurrence'] ?? '', true);
             $currentTasks[] = [
                 'task_type' => $task['task_type'],
                 'due_date' => $task['due_date'],
@@ -546,204 +583,6 @@ class TaskController
         }
 
         return null;
-    }
-
-    /**
-     * Complete multiple tasks at once (bulk action)
-     */
-    public function bulkComplete(array $params, array $body, ?int $userId): array
-    {
-        $taskIds = $body['task_ids'] ?? [];
-        $notes = $body['notes'] ?? null;
-
-        if (empty($taskIds) || !is_array($taskIds)) {
-            return ['status' => 400, 'data' => ['error' => 'No task IDs provided']];
-        }
-
-        // Limit to 50 tasks per request
-        $taskIds = array_slice($taskIds, 0, 50);
-
-        $completed = [];
-        $failed = [];
-
-        foreach ($taskIds as $taskId) {
-            // Get task details
-            $stmt = db()->prepare('
-                SELECT t.*, p.user_id as owner_id
-                FROM tasks t
-                JOIN plants p ON t.plant_id = p.id
-                WHERE t.id = ?
-            ');
-            $stmt->execute([$taskId]);
-            $task = $stmt->fetch();
-
-            if (!$task || !$this->canAccessPlant($task['plant_id'], $userId)) {
-                $failed[] = $taskId;
-                continue;
-            }
-
-            if ($task['completed_at']) {
-                // Already completed, skip
-                $completed[] = $taskId;
-                continue;
-            }
-
-            // Mark as completed with attribution
-            $stmt = db()->prepare('UPDATE tasks SET completed_at = datetime("now"), notes = ?, completed_by_user_id = ? WHERE id = ?');
-            $stmt->execute([$notes, $userId, $taskId]);
-
-            // Log to care log with performer attribution
-            $stmt = db()->prepare('
-                INSERT INTO care_log (plant_id, task_id, action, notes, performed_by_user_id)
-                VALUES (?, ?, ?, ?, ?)
-            ');
-            $stmt->execute([
-                $task['plant_id'],
-                $taskId,
-                $task['task_type'],
-                $notes,
-                $userId
-            ]);
-
-            // Generate next occurrence if recurring
-            if ($task['recurrence']) {
-                $this->generateNextOccurrence($task);
-            }
-
-            $completed[] = $taskId;
-        }
-
-        return [
-            'completed' => $completed,
-            'failed' => $failed,
-            'count' => count($completed)
-        ];
-    }
-
-    /**
-     * Skip multiple tasks at once (bulk action)
-     */
-    public function bulkSkip(array $params, array $body, ?int $userId): array
-    {
-        $taskIds = $body['task_ids'] ?? [];
-        $reason = $body['reason'] ?? null;
-
-        if (empty($taskIds) || !is_array($taskIds)) {
-            return ['status' => 400, 'data' => ['error' => 'No task IDs provided']];
-        }
-
-        // Limit to 50 tasks per request
-        $taskIds = array_slice($taskIds, 0, 50);
-
-        $skipped = [];
-        $failed = [];
-
-        foreach ($taskIds as $taskId) {
-            // Get task details
-            $stmt = db()->prepare('
-                SELECT t.*, p.user_id as owner_id
-                FROM tasks t
-                JOIN plants p ON t.plant_id = p.id
-                WHERE t.id = ?
-            ');
-            $stmt->execute([$taskId]);
-            $task = $stmt->fetch();
-
-            if (!$task || !$this->canAccessPlant($task['plant_id'], $userId)) {
-                $failed[] = $taskId;
-                continue;
-            }
-
-            if ($task['skipped_at'] || $task['completed_at']) {
-                // Already skipped or completed, skip
-                $skipped[] = $taskId;
-                continue;
-            }
-
-            // Mark as skipped
-            $stmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
-            $stmt->execute([$reason, $taskId]);
-
-            // Log to care log with performer attribution
-            $stmt = db()->prepare('
-                INSERT INTO care_log (plant_id, task_id, action, notes, outcome, performed_by_user_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ');
-            $stmt->execute([
-                $task['plant_id'],
-                $taskId,
-                'skipped_' . $task['task_type'],
-                $reason,
-                'neutral',
-                $userId
-            ]);
-
-            // Generate next occurrence if recurring
-            if ($task['recurrence']) {
-                $this->generateNextOccurrence($task);
-            }
-
-            $skipped[] = $taskId;
-        }
-
-        return [
-            'skipped' => $skipped,
-            'failed' => $failed,
-            'count' => count($skipped)
-        ];
-    }
-
-    /**
-     * Skip a task
-     */
-    public function skip(array $params, array $body, ?int $userId): array
-    {
-        $taskId = $params['id'];
-        $reason = $body['reason'] ?? null;
-
-        // Get task details
-        $stmt = db()->prepare('
-            SELECT t.*, p.user_id as owner_id
-            FROM tasks t
-            JOIN plants p ON t.plant_id = p.id
-            WHERE t.id = ?
-        ');
-        $stmt->execute([$taskId]);
-        $task = $stmt->fetch();
-
-        if (!$task) {
-            return ['status' => 404, 'data' => ['error' => 'Task not found']];
-        }
-
-        // Verify access (owned or shared via household)
-        if (!$this->canAccessPlant($task['plant_id'], $userId)) {
-            return ['status' => 404, 'data' => ['error' => 'Task not found']];
-        }
-
-        // Mark as skipped
-        $stmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
-        $stmt->execute([$reason, $taskId]);
-
-        // Log to care log with performer attribution
-        $stmt = db()->prepare('
-            INSERT INTO care_log (plant_id, task_id, action, notes, outcome, performed_by_user_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ');
-        $stmt->execute([
-            $task['plant_id'],
-            $taskId,
-            'skipped_' . $task['task_type'],
-            $reason,
-            'neutral',
-            $userId
-        ]);
-
-        // Generate next occurrence if recurring, using skip-specific delays
-        if ($task['recurrence']) {
-            $this->generateNextOccurrence($task, 'skip');
-        }
-
-        return ['task' => $task];
     }
 
     /**
@@ -782,7 +621,7 @@ class TaskController
         }
 
         // Verify access (owned or shared via household)
-        if (!$this->canAccessPlant($task['plant_id'], $userId)) {
+        if (!CareScheduler::canAccessPlant((int) $task['plant_id'], $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Task not found']];
         }
 
@@ -818,11 +657,18 @@ class TaskController
         }, $healthHistory);
         $healthHistory = array_filter($healthHistory, fn($h) => $h['health_assessment']);
 
-        // Try to get weather data (if location available)
+        // Owner's care preferences shape the advice (fertilizer type, climate)
+        $settings = $this->scheduler->ownerSettings((int) $task['plant_id']);
+        $task['fertilizer_method'] = $settings['fertilizer_method'];
+        $stmt = db()->prepare('SELECT climate_notes FROM users WHERE id = ?');
+        $stmt->execute([$task['user_id']]);
+        $task['climate_notes'] = $stmt->fetchColumn() ?: null;
+
+        // Seasonal context
         $weather = $this->getWeatherContext();
 
         // Generate AI recommendations
-        $recommendations = $this->generateAIRecommendations($task, $careHistory, $healthHistory, $weather);
+        $recommendations = $this->generateAIRecommendations($task, $careHistory, $healthHistory, $weather, $userId);
 
         return [
             'recommendations' => $recommendations,
@@ -838,13 +684,7 @@ class TaskController
     {
         // For now, return seasonal context based on date
         // Could integrate with weather API later
-        $month = (int)date('n');
-        $season = match(true) {
-            $month >= 3 && $month <= 5 => 'spring',
-            $month >= 6 && $month <= 8 => 'summer',
-            $month >= 9 && $month <= 11 => 'fall',
-            default => 'winter'
-        };
+        $season = Clock::season();
 
         $seasonalContext = [
             'spring' => [
@@ -883,17 +723,15 @@ class TaskController
     /**
      * Generate AI recommendations for the task
      */
-    private function generateAIRecommendations(array $task, array $careHistory, array $healthHistory, ?array $weather): array
+    private function generateAIRecommendations(array $task, array $careHistory, array $healthHistory, ?array $weather, int $userId): array
     {
         // Build context for AI
         $context = $this->buildTaskContext($task, $careHistory, $healthHistory, $weather);
 
-        // Try to get AI service
+        // Use this user's own AI provider and key
         try {
-            $aiService = $this->getAIService();
-            if ($aiService) {
-                return $this->callAIForRecommendations($aiService, $task, $context);
-            }
+            $aiService = AIServiceFactory::getForUser($userId);
+            return $this->callAIForRecommendations($aiService, $task, $context);
         } catch (\Exception $e) {
             error_log("AI recommendation error: " . $e->getMessage());
         }
@@ -919,6 +757,12 @@ class TaskController
         if ($task['plant_notes']) {
             $context .= "- Owner's Notes: {$task['plant_notes']}\n";
         }
+        if (!empty($task['climate_notes'])) {
+            $context .= "- Home climate: {$task['climate_notes']}\n";
+        }
+        $context .= "- Fertilizer used: " . (($task['fertilizer_method'] ?? 'separate') === 'mixed'
+            ? 'liquid fertilizer mixed into the watering can'
+            : 'slow-release granules (Osmocote Plus 15-9-12) top-dressed on the soil') . "\n";
 
         // Care plan details from AI reasoning
         if (!empty($task['ai_reasoning'])) {
@@ -957,32 +801,6 @@ class TaskController
         }
 
         return $context;
-    }
-
-    /**
-     * Get AI service instance
-     */
-    private function getAIService(): ?object
-    {
-        // Check if user has API keys configured
-        $stmt = db()->prepare('SELECT setting_value FROM user_settings WHERE setting_key IN (?, ?) LIMIT 1');
-        $stmt->execute(['claude_api_key', 'openai_api_key']);
-        $setting = $stmt->fetch();
-
-        if (!$setting) {
-            return null;
-        }
-
-        // Decrypt and create service
-        $encryptedKey = $setting['setting_value'];
-        $apiKey = EncryptionService::decrypt($encryptedKey);
-
-        // Determine which service based on key format
-        if (strpos($apiKey, 'sk-ant-') === 0) {
-            return new ClaudeService($apiKey);
-        } else {
-            return new OpenAIService($apiKey);
-        }
     }
 
     /**
@@ -1104,9 +922,27 @@ Be specific to THIS plant's species ({$task['species']}), current health ({$task
                 break;
 
             case 'fertilize':
+                if (($task['fertilizer_method'] ?? 'separate') === 'separate') {
+                    $doses = ['small' => 'about 1/2 teaspoon', 'medium' => 'about 1 teaspoon', 'large' => 'about 2 teaspoons', 'xlarge' => 'about 1 tablespoon'];
+                    $dose = $doses[$potSize] ?? $doses['medium'];
+                    $recommendations['summary'] = "Top-dress {$task['plant_name']} with slow-release granules. They feed for about 4 months.";
+                    $recommendations['amount'] = "$dose of Osmocote Plus (check the label rate for your pot size)";
+                    $recommendations['steps'] = [
+                        "Sprinkle the granules evenly on the soil surface, away from the stems",
+                        "Scratch them lightly into the top inch of soil",
+                        "Water as usual on the plant's normal schedule (no extra watering needed today)",
+                    ];
+                    $recommendations['timing'] = 'Early spring and mid-summer. Skip September through February.';
+                    if (str_contains($species, 'succulent') || str_contains($species, 'cactus')) {
+                        $recommendations['warnings'][] = "Use half the label rate for succulents and cacti";
+                    }
+                    $recommendations['warnings'][] = "Skip it if this plant was repotted in the last 3 months into mix that already has fertilizer";
+                    break;
+                }
                 $strengths = ['small' => '1/4', 'medium' => '1/2', 'large' => '1/2-full', 'xlarge' => 'full'];
-                $recommendations['summary'] = "Apply balanced fertilizer at {$strengths[$potSize]} strength to support growth.";
-                $recommendations['amount'] = "{$strengths[$potSize]} strength dilution";
+                $strength = $strengths[$potSize] ?? $strengths['medium'];
+                $recommendations['summary'] = "Apply balanced liquid fertilizer at {$strength} strength to support growth.";
+                $recommendations['amount'] = "{$strength} strength dilution";
                 $recommendations['steps'] = [
                     "Ensure soil is moist before fertilizing (water lightly first if dry)",
                     "Mix fertilizer at recommended dilution",
@@ -1217,13 +1053,12 @@ Be specific to THIS plant's species ({$task['species']}), current health ({$task
         }
 
         // Verify access (owned or shared via household)
-        if (!$this->canAccessPlant($task['plant_id'], $userId)) {
+        if (!CareScheduler::canAccessPlant((int) $task['plant_id'], $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Task not found']];
         }
 
-        // Get current recurrence
-        $recurrence = json_decode($task['recurrence'], true);
-        $currentInterval = $recurrence['interval'] ?? 7;
+        // Current interval (the owner's override wins over the plan)
+        $currentInterval = $this->scheduler->intervalFor($task) ?? 7;
 
         // Get skip history for this plant and task type
         $stmt = db()->prepare('
@@ -1231,20 +1066,18 @@ Be specific to THIS plant's species ({$task['species']}), current health ({$task
                    GROUP_CONCAT(notes) as reasons
             FROM care_log
             WHERE plant_id = ?
-              AND action LIKE ?
+              AND action = ?
               AND performed_at > datetime("now", "-30 days")
         ');
-        $stmt->execute([$task['plant_id'], 'skipped_%']);
+        $stmt->execute([$task['plant_id'], 'skipped_' . $task['task_type']]);
         $skipHistory = $stmt->fetch();
 
         // Try AI service for smart suggestion
         try {
-            $aiService = $this->getAIService();
-            if ($aiService) {
-                $suggestion = $this->getAIScheduleSuggestion($aiService, $task, $reason, $currentInterval, $skipHistory);
-                if ($suggestion) {
-                    return $suggestion;
-                }
+            $aiService = AIServiceFactory::getForUser($userId);
+            $suggestion = $this->getAIScheduleSuggestion($aiService, $task, $reason, $currentInterval, $skipHistory);
+            if ($suggestion) {
+                return $suggestion;
             }
         } catch (\Exception $e) {
             error_log("AI schedule adjustment error: " . $e->getMessage());
@@ -1314,6 +1147,9 @@ Consider:
             $result = json_decode(trim($content), true);
 
             if ($result && isset($result['suggestion'])) {
+                if (isset($result['new_interval'])) {
+                    $result['new_interval'] = max(1, min(365, (int) $result['new_interval']));
+                }
                 return [
                     'suggestion' => $result['suggestion'],
                     'new_interval' => $result['new_interval'],
@@ -1349,7 +1185,13 @@ Consider:
             $newInterval = $currentInterval + 1;
             $suggestion = "Extending the schedule slightly to every " . round($newInterval) . " days to avoid over-caring.";
         } elseif (strpos(strtolower($reason), 'stressed') !== false) {
-            $suggestion = "When a plant is stressed, maintaining the current schedule is often best. Monitor closely.";
+            return [
+                'suggestion' => "When a plant is stressed, keeping the current schedule is usually best. Watch it closely.",
+                'new_interval' => $currentInterval,
+                'should_adjust' => false,
+                'adjustment' => null,
+                'source' => 'fallback'
+            ];
         } else {
             $suggestion = "Based on your feedback, consider adjusting to every " . ($currentInterval + 1) . " days.";
             $newInterval = $currentInterval + 1;
@@ -1369,310 +1211,45 @@ Consider:
     }
 
     /**
-     * Apply schedule adjustment and skip task
+     * Save a new interval for this plant and task type, then skip the
+     * current task. The interval is kept as an override, so care plan
+     * rebuilds and season changes don't undo it.
      */
     public function applyAdjustment(array $params, array $body, ?int $userId): array
     {
-        $taskId = $params['id'];
-        $reason = $body['reason'] ?? '';
-        $adjustment = $body['adjustment'] ?? null;
-
-        // Get task details
-        $stmt = db()->prepare('
-            SELECT t.*, p.user_id as owner_id, p.id as plant_id
-            FROM tasks t
-            JOIN plants p ON t.plant_id = p.id
-            WHERE t.id = ?
-        ');
-        $stmt->execute([$taskId]);
-        $task = $stmt->fetch();
-
+        $task = $this->findAccessibleTask($params['id'], $userId);
         if (!$task) {
-            return ['status' => 404, 'data' => ['error' => 'Task not found']];
+            return $this->notFound();
         }
 
-        // Verify access (owned or shared via household)
-        if (!$this->canAccessPlant($task['plant_id'], $userId)) {
-            return ['status' => 404, 'data' => ['error' => 'Task not found']];
+        $reason = trim((string) ($body['reason'] ?? ''));
+        $adjustment = $body['adjustment'] ?? null;
+        $newInterval = null;
+
+        if (is_array($adjustment) && isset($adjustment['value']) && (int) $adjustment['value'] > 0) {
+            $newInterval = $this->scheduler->setOverride((int) $task['plant_id'], $task['task_type'], (int) $adjustment['value']);
         }
 
-        // Update the recurrence interval if adjustment provided
-        if ($adjustment && isset($adjustment['value'])) {
-            $recurrence = json_decode($task['recurrence'], true) ?: ['type' => 'days', 'interval' => 7];
-            $recurrence['interval'] = (int)$adjustment['value'];
+        $task = CareScheduler::loadTask((int) $task['id']);
+        $this->scheduler->skip($task, $userId, trim($reason . ' (schedule adjusted)'), 'complete', null, null, false);
 
-            // Update future tasks of same type
-            $stmt = db()->prepare('
-                UPDATE tasks
-                SET recurrence = ?
-                WHERE plant_id = ?
-                  AND task_type = ?
-                  AND completed_at IS NULL
-                  AND skipped_at IS NULL
-            ');
-            $stmt->execute([
-                json_encode($recurrence),
-                $task['plant_id'],
-                $task['task_type']
-            ]);
-
-            // Update care plan if exists - use dynamic field based on task type
-            $allowedTaskTypes = ['water', 'fertilize', 'mist', 'rotate', 'check'];
-            if (in_array($task['task_type'], $allowedTaskTypes)) {
-                $carePlanField = $task['task_type'] . '_frequency_days';
-                try {
-                    $stmt = db()->prepare("
-                        UPDATE care_plans
-                        SET $carePlanField = ?, updated_at = datetime('now')
-                        WHERE plant_id = ? AND is_active = 1
-                    ");
-                    $stmt->execute([(int)$adjustment['value'], $task['plant_id']]);
-                } catch (\Exception $e) {
-                    // Field might not exist, ignore
-                }
-            }
-        }
-
-        // Skip the current task
-        $stmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
-        $stmt->execute([$reason . ' (schedule adjusted)', $taskId]);
-
-        // Log to care log
         $stmt = db()->prepare('
-            INSERT INTO care_log (plant_id, task_id, action, notes, outcome)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO care_log (plant_id, task_id, action, notes, outcome, performed_by_user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
         ');
         $stmt->execute([
             $task['plant_id'],
-            $taskId,
+            $task['id'],
             'schedule_adjusted_' . $task['task_type'],
-            $reason . ' - Adjusted to every ' . ($adjustment['value'] ?? '?') . ' days',
-            'positive'
+            trim($reason . ' - Adjusted to every ' . ($newInterval ?? '?') . ' days', ' -'),
+            'positive',
+            $userId,
         ]);
-
-        // Generate next occurrence with new interval
-        if ($task['recurrence']) {
-            $newRecurrence = json_decode($task['recurrence'], true) ?: [];
-            $newRecurrence['interval'] = (int)($adjustment['value'] ?? $newRecurrence['interval'] ?? 7);
-            $task['recurrence'] = json_encode($newRecurrence);
-            $this->generateNextOccurrence($task);
-        }
 
         return [
             'success' => true,
             'message' => 'Schedule updated and task skipped',
-            'new_interval' => $adjustment['value'] ?? null
+            'new_interval' => $newInterval,
         ];
-    }
-
-    /**
-     * Generate next occurrence of recurring task
-     * @param string $mode 'complete' or 'skip' — skip uses shorter type-based delays
-     */
-    /**
-     * Run the side effects that should follow ANY task completion, regardless of
-     * who completed it (owner, sitter, etc.): generate the next occurrence so the
-     * recurring chain continues, and auto-skip the sibling water task if a
-     * fertilize task was just completed (fertilizer is mixed with water).
-     *
-     * Callers are responsible for marking the task completed and writing the
-     * care_log entry before invoking this — those steps differ slightly between
-     * the owner flow (attribution + check data) and the sitter flow (token-based).
-     */
-    public function runCompletionSideEffects(array $task): void
-    {
-        if ($task['recurrence']) {
-            $this->generateNextOccurrence($task);
-        }
-
-        if ($task['task_type'] === 'fertilize') {
-            $siblingStmt = db()->prepare('
-                SELECT id, recurrence, due_date, care_plan_id, plant_id, task_type, instructions, priority FROM tasks
-                WHERE plant_id = ? AND task_type = "water"
-                  AND completed_at IS NULL AND skipped_at IS NULL
-                ORDER BY due_date ASC LIMIT 1
-            ');
-            $siblingStmt->execute([$task['plant_id']]);
-            $siblingTask = $siblingStmt->fetch();
-            if ($siblingTask) {
-                $skipStmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
-                $skipStmt->execute(['Auto-skipped: plant fertilized (fertilizer mixed with water)', $siblingTask['id']]);
-                if ($siblingTask['recurrence']) {
-                    $this->generateNextOccurrence($siblingTask, 'skip');
-                }
-            }
-        }
-    }
-
-    private function generateNextOccurrence(array $task, string $mode = 'complete'): void
-    {
-        // Required fields for the INSERT — surface bugs loudly instead of failing
-        // silently when callers pass a partial row (NOT NULL violations are swallowed
-        // under PDO::ERRMODE_SILENT).
-        foreach (['plant_id', 'task_type'] as $required) {
-            if (empty($task[$required])) {
-                error_log("generateNextOccurrence: missing required field '$required' for task " . ($task['id'] ?? 'unknown'));
-                return;
-            }
-        }
-
-        $recurrence = json_decode($task['recurrence'], true);
-        if (!$recurrence) return;
-
-        $interval = $recurrence['interval'] ?? 7;
-        $type = $recurrence['type'] ?? 'days';
-
-        if ($mode === 'skip') {
-            // When skipping, use type-specific delays (shorter than full interval)
-            $skipDelays = [
-                'water' => 1,        // Next day — plant still needs water
-                'mist' => 1,         // Next day — humidity-sensitive
-                'change_water' => 2, // 2 days — propagation water freshness
-                'check' => 3,        // 3 days — routine monitoring
-                'fertilize' => 7,    // 1 week — not time-critical
-                'rotate' => 7,       // 1 week — gradual process
-                'trim' => 7,         // 1 week — can wait
-                'prune' => 7,        // 1 week — can wait
-                'repot' => 14,       // 2 weeks — major task
-                'pot_up' => 14,      // 2 weeks — major task
-                'check_roots' => 14, // 2 weeks — infrequent
-            ];
-            $skipDays = $skipDelays[$task['task_type']] ?? 3;
-            // Use the shorter of skip delay or full interval
-            $effectiveDelay = min($skipDays, $interval);
-            $nextDate = date('Y-m-d', strtotime("today +$effectiveDelay days"));
-        } else {
-            // When completing, space by full interval from whichever is later
-            $fromDueDate = strtotime($task['due_date'] . " +$interval $type");
-            // Ensure at least $interval days from today (prevents back-to-back
-            // tasks when completed late)
-            $fromToday = strtotime("today +$interval $type");
-            $nextDate = date('Y-m-d', max($fromDueDate, $fromToday));
-        }
-
-        // Check if ANY pending task of this type already exists for this plant
-        $stmt = db()->prepare('
-            SELECT id FROM tasks
-            WHERE plant_id = ?
-              AND task_type = ?
-              AND completed_at IS NULL
-              AND skipped_at IS NULL
-            LIMIT 1
-        ');
-        $stmt->execute([$task['plant_id'], $task['task_type']]);
-        if ($stmt->fetch()) {
-            // A pending task of this type already exists, skip creation
-            return;
-        }
-
-        $stmt = db()->prepare('
-            INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, instructions, priority)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ');
-        $stmt->execute([
-            $task['care_plan_id'],
-            $task['plant_id'],
-            $task['task_type'],
-            $nextDate,
-            $task['recurrence'],
-            $task['instructions'],
-            $task['priority']
-        ]);
-    }
-
-    /**
-     * Daily reconciliation: check all pending tasks against actual care history.
-     * If a plant was recently watered/fertilized but still has a pending water task
-     * that's too soon, push it out. Also skip redundant water+fertilize on same day.
-     */
-    private function reconcileOverdueTasks(int $userId, string $accessCondition): void
-    {
-        $today = date('Y-m-d');
-
-        // Find all pending water/fertilize tasks for user's plants
-        $stmt = db()->query("
-            SELECT t.id, t.plant_id, t.task_type, t.due_date, t.recurrence
-            FROM tasks t
-            JOIN plants p ON t.plant_id = p.id
-            WHERE {$accessCondition}
-              AND t.task_type IN ('water', 'fertilize')
-              AND t.completed_at IS NULL
-              AND t.skipped_at IS NULL
-              AND t.due_date <= '{$today}'
-              AND p.archived_at IS NULL
-            ORDER BY t.plant_id, t.task_type
-        ");
-        $pendingTasks = $stmt->fetchAll();
-
-        foreach ($pendingTasks as $task) {
-            $recurrence = json_decode($task['recurrence'], true);
-            $interval = $recurrence['interval'] ?? 7;
-
-            // Which care actions count as having satisfied this task? Fertilizing
-            // also waters the plant, so a water task is deferred by either action.
-            // Watering does NOT fertilize, so a fertilize task is only deferred by
-            // an actual fertilize. Counting waterings here re-deferred a fertilize
-            // task by a full fertilize interval the moment it came due, on every
-            // load of the Today view, so it could never stay due long enough to be
-            // seen. 0.14.3 made the sibling auto-skip one-directional but left this
-            // path symmetric, which is why fertilize tasks stayed invisible.
-            $satisfyingActions = $task['task_type'] === 'fertilize'
-                ? ['fertilize']
-                : ['water', 'fertilize'];
-            $placeholders = implode(',', array_fill(0, count($satisfyingActions), '?'));
-
-            $logStmt = db()->prepare("
-                SELECT MAX(performed_at) as last_action
-                FROM care_log
-                WHERE plant_id = ? AND action IN ({$placeholders})
-            ");
-            $logStmt->execute(array_merge([$task['plant_id']], $satisfyingActions));
-            $lastAction = $logStmt->fetch();
-
-            if ($lastAction && $lastAction['last_action']) {
-                $daysSinceAction = (int)((strtotime($today) - strtotime($lastAction['last_action'])) / 86400);
-
-                if ($daysSinceAction < $interval) {
-                    // Plant was recently cared for — push this task out
-                    $newDueDate = date('Y-m-d', strtotime($lastAction['last_action'] . " +{$interval} days"));
-                    if ($newDueDate > $today) {
-                        $updateStmt = db()->prepare('UPDATE tasks SET due_date = ? WHERE id = ?');
-                        $updateStmt->execute([$newDueDate, $task['id']]);
-                    }
-                }
-            }
-        }
-
-        // Remove same-day water+fertilize conflicts: if both pending for same plant,
-        // skip the water task (fertilize takes priority since it includes watering)
-        $stmt2 = db()->query("
-            SELECT t.id, t.plant_id, t.task_type, t.recurrence
-            FROM tasks t
-            JOIN plants p ON t.plant_id = p.id
-            WHERE {$accessCondition}
-              AND t.task_type IN ('water', 'fertilize')
-              AND t.completed_at IS NULL AND t.skipped_at IS NULL
-              AND t.due_date <= '{$today}'
-              AND p.archived_at IS NULL
-        ");
-        $remaining = $stmt2->fetchAll();
-
-        // Group by plant
-        $byPlant = [];
-        foreach ($remaining as $t) {
-            $byPlant[$t['plant_id']][$t['task_type']] = $t;
-        }
-
-        foreach ($byPlant as $plantId => $types) {
-            if (isset($types['water']) && isset($types['fertilize'])) {
-                // Both due — skip the water task
-                $waterTask = $types['water'];
-                $skipStmt = db()->prepare('UPDATE tasks SET skipped_at = datetime("now"), skip_reason = ? WHERE id = ?');
-                $skipStmt->execute(['Auto-skipped: fertilize task covers watering', $waterTask['id']]);
-                if ($waterTask['recurrence']) {
-                    $this->generateNextOccurrence($waterTask, 'skip');
-                }
-            }
-        }
     }
 }

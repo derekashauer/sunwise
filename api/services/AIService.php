@@ -89,6 +89,36 @@ interface AIServiceInterface
  */
 class AIServiceFactory
 {
+    public const CLAUDE_MODELS = [
+        'claude-opus-5-5' => 'Claude Opus 5.5 (Most capable)',
+        'claude-sonnet-5-5' => 'Claude Sonnet 5.5 (Balanced)',
+        'claude-haiku-5-5' => 'Claude Haiku 5.5 (Fast & cheap)'
+    ];
+
+    public const OPENAI_MODELS = [
+        'gpt-5.2' => 'GPT-5.2 (Most capable)',
+        'gpt-4.5-preview' => 'GPT-4.5 Preview',
+        'gpt-4o' => 'GPT-4o (Balanced)',
+        'gpt-4o-mini' => 'GPT-4o Mini (Fast & cheap)',
+        'o1' => 'o1 (Advanced reasoning)',
+        'o1-mini' => 'o1 Mini (Efficient reasoning)'
+    ];
+
+    public const DEFAULT_CLAUDE_MODEL = 'claude-opus-5-5';
+    public const DEFAULT_OPENAI_MODEL = 'gpt-5.2';
+
+    /**
+     * The model to use for a provider. A saved model that is no longer
+     * offered (like an older Claude model) falls back to the default.
+     */
+    public static function resolveModel(string $provider, ?string $saved): string
+    {
+        if ($provider === 'openai') {
+            return ($saved && isset(self::OPENAI_MODELS[$saved])) ? $saved : self::DEFAULT_OPENAI_MODEL;
+        }
+        return ($saved && isset(self::CLAUDE_MODELS[$saved])) ? $saved : self::DEFAULT_CLAUDE_MODEL;
+    }
+
     /**
      * Get AI service for a user based on their settings
      *
@@ -108,31 +138,35 @@ class AIServiceFactory
         $useProvider = $provider ?? ($settings['default_provider'] ?? 'openai');
 
         // Get the appropriate API key
+        // Use the model the user picked in Settings (it was saved but never applied before)
+        $claudeModel = self::resolveModel('claude', $settings['claude_model'] ?? null);
+        $openaiModel = self::resolveModel('openai', $settings['openai_model'] ?? null);
+
         if ($useProvider === 'openai') {
             $apiKey = self::getUserApiKey($settings, 'openai');
             if ($apiKey) {
-                return new OpenAIService($apiKey);
+                return new OpenAIService($apiKey, $openaiModel);
             }
             // Fall back to Claude if no OpenAI key
             $apiKey = self::getUserApiKey($settings, 'claude');
             if ($apiKey) {
-                return new ClaudeService($apiKey);
+                return new ClaudeService($apiKey, $claudeModel);
             }
         } else {
             $apiKey = self::getUserApiKey($settings, 'claude');
             if ($apiKey) {
-                return new ClaudeService($apiKey);
+                return new ClaudeService($apiKey, $claudeModel);
             }
             // Fall back to OpenAI if no Claude key
             $apiKey = self::getUserApiKey($settings, 'openai');
             if ($apiKey) {
-                return new OpenAIService($apiKey);
+                return new OpenAIService($apiKey, $openaiModel);
             }
         }
 
         // Fall back to server-configured keys
         if (CLAUDE_API_KEY) {
-            return new ClaudeService(CLAUDE_API_KEY);
+            return new ClaudeService(CLAUDE_API_KEY, $claudeModel);
         }
 
         throw new Exception('No AI API key configured. Please add your API key in Settings.');

@@ -153,10 +153,10 @@ const plantsByLocation = computed(() => {
         </p>
       </div>
       <div class="flex gap-2">
-        <button @click="showLocationsPanel = !showLocationsPanel" class="btn-secondary px-3">
+        <button type="button" @click="showLocationsPanel = !showLocationsPanel" class="btn-secondary px-3" aria-label="Manage locations" :aria-expanded="showLocationsPanel">
           <img
             src="https://img.icons8.com/doodle/48/place-marker.png"
-            alt="locations"
+            alt=""
             class="w-5 h-5"
           >
         </button>
@@ -176,7 +176,7 @@ const plantsByLocation = computed(() => {
       <div class="relative">
         <img
           src="https://img.icons8.com/doodle/48/search.png"
-          alt="search"
+          alt=""
           class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 opacity-50"
         >
         <input
@@ -225,7 +225,7 @@ const plantsByLocation = computed(() => {
           >
           Manage Locations
         </h2>
-        <button @click="showLocationsPanel = false" class="text-charcoal-400 hover:text-charcoal-600 p-1">
+        <button type="button" @click="showLocationsPanel = false" class="text-charcoal-400 hover:text-charcoal-600 p-2" aria-label="Close locations">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -310,7 +310,8 @@ const plantsByLocation = computed(() => {
               <div class="flex gap-1">
                 <button
                   @click="startEditLocation(location)"
-                  class="p-1 text-charcoal-400 hover:text-sage-600"
+                  class="p-2 text-charcoal-400 hover:text-sage-600"
+                  :aria-label="`Edit ${location.name}`"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -318,7 +319,8 @@ const plantsByLocation = computed(() => {
                 </button>
                 <button
                   @click="deleteLocation(location.id)"
-                  class="p-1 text-charcoal-400 hover:text-terracotta-600"
+                  class="p-2 text-charcoal-400 hover:text-terracotta-600"
+                  :aria-label="`Delete ${location.name}`"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -349,7 +351,7 @@ const plantsByLocation = computed(() => {
       <div class="w-24 h-24 mx-auto mb-4 bg-sage-100 rounded-3xl flex items-center justify-center shadow-sage">
         <img
           src="https://img.icons8.com/doodle/96/potted-plant--v1.png"
-          alt="plants"
+          alt=""
           class="w-14 h-14"
         >
       </div>
@@ -370,7 +372,7 @@ const plantsByLocation = computed(() => {
       <div class="w-20 h-20 mx-auto mb-4 bg-cream-200 rounded-3xl flex items-center justify-center">
         <img
           src="https://img.icons8.com/doodle/96/search.png"
-          alt="no results"
+          alt=""
           class="w-10 h-10 opacity-50"
         >
       </div>
@@ -388,7 +390,7 @@ const plantsByLocation = computed(() => {
         <div class="flex items-center gap-2 mb-3">
           <img
             src="https://img.icons8.com/doodle/48/place-marker.png"
-            alt="location"
+            alt=""
             class="w-5 h-5"
           >
           <span class="font-semibold text-charcoal-600">{{ group.name }}</span>

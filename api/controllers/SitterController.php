@@ -82,6 +82,9 @@ class SitterController
             return ['status' => 404, 'data' => ['error' => 'Session not found or expired']];
         }
 
+        // The sitter sees "today" in the plant owner's time zone
+        Clock::useUserTimezone((int) $session['user_id']);
+
         // Update accessed_at
         $stmt = db()->prepare('UPDATE sitter_sessions SET accessed_at = datetime("now") WHERE id = ?');
         $stmt->execute([$session['id']]);
@@ -168,7 +171,7 @@ class SitterController
         // same reason as the show() query — anything still pending at session
         // end is fair game for the sitter.
         $stmt = db()->prepare('
-            SELECT s.id as session_id, t.*
+            SELECT s.id as session_id, s.user_id as session_user_id, t.*
             FROM sitter_sessions s
             JOIN sitter_plants sp ON s.id = sp.session_id
             JOIN tasks t ON sp.plant_id = t.plant_id
@@ -188,26 +191,10 @@ class SitterController
             return ['status' => 400, 'data' => ['error' => 'Task already completed']];
         }
 
-        // Mark as completed
-        $stmt = db()->prepare('UPDATE tasks SET completed_at = datetime("now"), notes = ? WHERE id = ?');
-        $stmt->execute(['Completed by sitter', $taskId]);
-
-        // Log to care log
-        $stmt = db()->prepare('
-            INSERT INTO care_log (plant_id, task_id, action, notes)
-            VALUES (?, ?, ?, ?)
-        ');
-        $stmt->execute([
-            $task['plant_id'],
-            $taskId,
-            $task['task_type'],
-            'Completed by sitter'
-        ]);
-
-        // Continue the recurring chain and run sibling-skip logic — same as
-        // when the owner completes a task. Without this the schedule stops
-        // dead as soon as the sitter touches anything.
-        (new TaskController())->runCompletionSideEffects($task);
+        // Same rules as when the owner completes a task, in the owner's time zone
+        Clock::useUserTimezone((int) ($task['session_user_id'] ?? 0));
+        $fullTask = CareScheduler::loadTask((int) $taskId);
+        (new CareScheduler())->complete($fullTask, null, 'Completed by sitter');
 
         // Get updated task
         $stmt = db()->prepare('SELECT * FROM tasks WHERE id = ?');

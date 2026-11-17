@@ -1,11 +1,14 @@
 <?php
 /**
  * Claude AI Service
- * Implements AIServiceInterface for Claude Opus 4.5
+ * Implements AIServiceInterface for Claude models
  */
 
 class ClaudeService implements AIServiceInterface
 {
+    /** Models that accept server-side refusal fallback ("fallbacks": "default"). */
+    private const FALLBACK_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5'];
+
     private string $apiKey;
     private string $model;
     private string $apiUrl = 'https://api.anthropic.com/v1/messages';
@@ -13,7 +16,7 @@ class ClaudeService implements AIServiceInterface
     public function __construct(?string $apiKey = null, ?string $model = null)
     {
         $this->apiKey = $apiKey ?? CLAUDE_API_KEY;
-        $this->model = $model ?? (defined('CLAUDE_MODEL') ? CLAUDE_MODEL : 'claude-sonnet-4-20250514');
+        $this->model = $model ?? (defined('CLAUDE_MODEL') ? CLAUDE_MODEL : 'claude-opus-5-5');
     }
 
     public function setModel(string $model): void
@@ -37,7 +40,7 @@ class ClaudeService implements AIServiceInterface
             // Make a minimal API call to validate the key
             $response = $this->sendRequest([
                 ['type' => 'text', 'text' => 'Say "ok"']
-            ], 10);
+            ], 2000);
             return !empty($response);
         } catch (Exception $e) {
             return false;
@@ -164,235 +167,10 @@ PROMPT;
      */
     public function generateCarePlan(array $plant, array $careLog, string $season): ?array
     {
-        $plantInfo = "Species: " . ($plant['species'] ?? 'Unknown houseplant');
-        $plantInfo .= "\nPot size: " . ($plant['pot_size'] ?? 'medium');
-        $plantInfo .= "\nSoil type: " . ($plant['soil_type'] ?? 'standard');
-        $plantInfo .= "\nLight condition: " . ($plant['light_condition'] ?? 'medium');
-        $plantInfo .= "\nLocation: " . ($plant['location'] ?? 'Not specified');
-        $plantInfo .= "\nCurrent health: " . ($plant['health_status'] ?? 'unknown');
-        $plantInfo .= "\nSeason: $season";
-
-        // Add user notes if present
-        if (!empty($plant['notes'])) {
-            $plantInfo .= "\nUser notes: " . $plant['notes'];
-        }
-
-        // Propagation info
-        if (!empty($plant['is_propagation'])) {
-            $plantInfo .= "\nPROPAGATION: This is a cutting/propagation, NOT a mature plant";
-            if (!empty($plant['propagation_date'])) {
-                $plantInfo .= "\nPropagation started: " . $plant['propagation_date'];
-            }
-            // Always specify growing medium for propagations
-            if ($plant['soil_type'] === 'water') {
-                $plantInfo .= "\nGrowing medium: Water (water propagation)";
-            } else {
-                // Rooting medium, soil, or any other type - all treated as soil-based propagation
-                $mediumLabel = $plant['soil_type'] === 'rooting' ? 'Rooting medium' : 'Soil (' . $plant['soil_type'] . ')';
-                $plantInfo .= "\nGrowing medium: " . $mediumLabel . " (soil propagation - NOT water)";
-            }
-        }
-
-        // Grow light info
-        if (!empty($plant['has_grow_light'])) {
-            $hours = $plant['grow_light_hours'] ?? 'unspecified';
-            $plantInfo .= "\nGrow light: Yes, {$hours} hours/day";
-        }
-
-        // Rotation setting
-        if (isset($plant['can_rotate']) && !$plant['can_rotate']) {
-            $plantInfo .= "\nCAN ROTATE: NO - Do NOT include rotate tasks for this plant";
-        }
-
-        // Species-specific care info (if available from AI identification)
-        $speciesCareInfo = "";
-        if (!empty($plant['known_care_needs'])) {
-            $care = $plant['known_care_needs'];
-            $speciesCareInfo = "\n\n=== SPECIES-SPECIFIC CARE GUIDELINES ===";
-            if (!empty($care['water']['frequency'])) {
-                $speciesCareInfo .= "\nWatering: " . $care['water']['frequency'];
-            }
-            if (!empty($care['light']['ideal'])) {
-                $speciesCareInfo .= "\nLight needs: " . $care['light']['ideal'];
-            }
-            if (!empty($care['humidity']['ideal'])) {
-                $speciesCareInfo .= "\nHumidity: " . $care['humidity']['ideal'];
-            }
-            if (!empty($care['fertilizer']['frequency'])) {
-                $speciesCareInfo .= "\nFertilizing: " . $care['fertilizer']['frequency'];
-            }
-        }
-
-        // Recent health analysis from photos
-        $healthContext = "";
-        if (!empty($plant['last_photo_analysis'])) {
-            $analysis = $plant['last_photo_analysis'];
-            $healthContext = "\n\n=== RECENT HEALTH ANALYSIS ===";
-            $healthContext .= "\nPhoto date: " . ($plant['last_photo_date'] ?? 'Unknown');
-            if (!empty($analysis['health_status'])) {
-                $healthContext .= "\nHealth status: " . $analysis['health_status'];
-            }
-            if (!empty($analysis['issues']) && is_array($analysis['issues'])) {
-                $healthContext .= "\nIdentified issues: " . implode(', ', $analysis['issues']);
-            }
-            if (!empty($analysis['recommendations']) && is_array($analysis['recommendations'])) {
-                $healthContext .= "\nRecommendations: " . implode('; ', array_slice($analysis['recommendations'], 0, 3));
-            }
-        }
-
-        // Care history statistics
-        $statsInfo = "";
-        if (!empty($plant['care_history_stats'])) {
-            $statsInfo = "\n\n=== CARE COMPLETION HISTORY ===";
-            foreach ($plant['care_history_stats'] as $stat) {
-                $statsInfo .= "\n- {$stat['task_type']}: completed {$stat['count']} times";
-                if (!empty($stat['last_completed'])) {
-                    $statsInfo .= " (last: " . date('M j', strtotime($stat['last_completed'])) . ")";
-                }
-            }
-        }
-
-        $careHistory = "";
-        $checkReadings = "";
-        if (!empty($careLog)) {
-            $careHistory = "\n\n=== RECENT CARE ACTIONS ===";
-            $checks = [];
-            foreach (array_slice($careLog, 0, 15) as $log) {
-                $careHistory .= "\n- {$log['action']} on " . date('M j', strtotime($log['performed_at']));
-                if (!empty($log['notes'])) {
-                    $careHistory .= " ({$log['notes']})";
-                }
-                if (!empty($log['outcome'])) {
-                    $careHistory .= " [outcome: {$log['outcome']}]";
-                }
-
-                // Collect check readings for separate analysis
-                if ($log['action'] === 'check' && !empty($log['check_data'])) {
-                    $checkData = json_decode($log['check_data'], true);
-                    if ($checkData) {
-                        $checks[] = ['date' => $log['performed_at'], 'data' => $checkData];
-                    }
-                }
-            }
-
-            // Format check readings for AI analysis
-            if (!empty($checks)) {
-                $checkReadings = "\n\n=== PLANT CHECK READINGS ===";
-                $checkReadings .= "\n(Use these to assess plant health trends. Light readings taken in evening/night should be disregarded for peak light assessment.)";
-                foreach (array_slice($checks, 0, 10) as $check) {
-                    $data = $check['data'];
-                    $time = date('M j \a\t g:ia', strtotime($data['recorded_at'] ?? $check['date']));
-                    $checkReadings .= "\n\n$time:";
-
-                    if (isset($data['moisture_level'])) {
-                        $moistureLabel = $data['moisture_level'] <= 3 ? 'dry' : ($data['moisture_level'] <= 7 ? 'moist' : 'wet');
-                        $checkReadings .= "\n  - Moisture: {$data['moisture_level']}/10 ($moistureLabel)";
-                    }
-                    if (!empty($data['light_reading'])) {
-                        $checkReadings .= "\n  - Light: {$data['light_reading']} fc";
-                    }
-                    if (isset($data['general_health'])) {
-                        $checkReadings .= "\n  - Health rating: {$data['general_health']}/5";
-                    }
-
-                    $observations = [];
-                    if (!empty($data['new_growth'])) $observations[] = 'new growth';
-                    if (!empty($data['yellowing_leaves'])) $observations[] = 'yellowing leaves';
-                    if (!empty($data['brown_tips'])) $observations[] = 'brown tips';
-                    if (!empty($data['pests_observed'])) {
-                        $pestInfo = 'pests observed';
-                        if (!empty($data['pest_notes'])) {
-                            $pestInfo .= " ({$data['pest_notes']})";
-                        }
-                        $observations[] = $pestInfo;
-                    }
-                    if (!empty($data['dusty_dirty'])) $observations[] = 'needs cleaning';
-
-                    if (!empty($observations)) {
-                        $checkReadings .= "\n  - Observations: " . implode(', ', $observations);
-                    }
-                    if (!empty($data['notes'])) {
-                        $checkReadings .= "\n  - Notes: {$data['notes']}";
-                    }
-                }
-            }
-        }
-
-        $today = date('Y-m-d');
-
-        $prompt = <<<PROMPT
-Generate a personalized care plan for this plant based on all available data.
-
-=== PLANT DETAILS ===
-$plantInfo
-$speciesCareInfo
-$healthContext
-$statsInfo
-$careHistory
-$checkReadings
-
-Today's date: $today
-
-Create a personalized care schedule considering:
-1. USER NOTES ARE THE HIGHEST PRIORITY - if the user specifies a watering frequency or care preference, follow it exactly
-2. The specific species needs (use the species-specific guidelines if provided, but user notes override these)
-3. Current season ($season) and how it affects watering/fertilizing
-4. The plant's health status and any recent issues identified
-5. Previous care history, outcomes, and completion patterns
-6. The plant's environment (location, light, grow lights)
-7. PLANT CHECK READINGS (if available) - use moisture levels to optimize watering intervals, light readings to assess if plant is getting adequate light, and observations to identify health trends
-
-CRITICAL - Calculating due_date:
-- Look at the CARE COMPLETION HISTORY to find when each task type was last completed
-- Calculate the next due_date as: last_completed_date + interval_days
-- If this calculated date is in the past (overdue), set due_date to TODAY
-- If no completion history exists, set due_date to today
-- Example: If user says "water every 3 days" and last watering was 6 days ago, the task is overdue - set due_date to today
-
-Respond ONLY with valid JSON:
-{
-    "reasoning": "Brief explanation of the care plan rationale, referencing specific factors you considered",
-    "next_photo_check": "YYYY-MM-DD when to request health photo",
-    "photo_check_reason": "Why you're requesting a photo then",
-    "tasks": [
-        {
-            "type": "water|fertilize|trim|repot|rotate|mist|check|change_water|check_roots|pot_up",
-            "due_date": "YYYY-MM-DD",
-            "recurrence": {"type": "days", "interval": 7},
-            "instructions": "Specific instructions for this task",
-            "priority": "low|normal|high|urgent"
-        }
-    ]
-}
-
-Include 3-5 different task types. Set reasonable intervals based on plant type and season.
-
-IMPORTANT for propagations:
-- Check the "Growing medium" field to determine the correct task type:
-  - If Growing medium is "Water" → use "change_water" task (NOT "water") every 3-7 days
-  - If Growing medium is "Rooting medium" or any soil type → use "water" task (NOT "change_water")
-- NEVER use "change_water" for soil/rooting medium propagations
-- NEVER use "water" for water propagations
-- Add "check_roots" tasks to monitor root development
-- Add "pot_up" task when roots should be ready (usually 4-8 weeks)
-- Skip fertilizing until roots are established
-- Misting is more important for cuttings
-
-IMPORTANT for grow lights:
-- Consider grow light hours when scheduling. More light = more water needed
-- Grow lights can compensate for low natural light conditions
-
-IMPORTANT for health issues:
-- If there are identified health issues, prioritize tasks that address them
-- Adjust watering frequency if overwatering/underwatering was detected
-PROMPT;
-
+        $prompt = CarePlanPrompt::build($plant, $careLog, $season);
         $response = $this->sendRequest([
-            [
-                'type' => 'text',
-                'text' => $prompt
-            ]
-        ]);
+            ['type' => 'text', 'text' => $prompt]
+        ], 16000, CarePlanPrompt::schema());
 
         return $this->parseJsonResponse($response);
     }
@@ -461,7 +239,7 @@ INST;
         }
 
         // Send to Claude API
-        $response = $this->sendChatRequest($content, 2048);
+        $response = $this->sendChatRequest($content, 8000);
         $parsed = $this->parseJsonResponse($response);
 
         if ($parsed && isset($parsed['content'])) {
@@ -502,6 +280,14 @@ INST;
         $prompt .= "**Soil Type**: " . ($plant['soil_type'] ?? 'Not specified') . "\n";
         $prompt .= "**Light Condition**: " . ($plant['light_condition'] ?? 'Not specified') . "\n";
         $prompt .= "**Current Health**: " . ($plant['health_status'] ?? 'Unknown') . "\n";
+        if (!empty($plant['climate_notes'])) {
+            $prompt .= "**Home Climate**: " . $plant['climate_notes'] . "\n";
+        }
+        if (!empty($plant['fertilizer_method'])) {
+            $prompt .= "**Fertilizer Used**: " . ($plant['fertilizer_method'] === 'mixed'
+                ? 'liquid fertilizer mixed into water'
+                : 'slow-release granules (Osmocote Plus 15-9-12), fed about every 4 months, paused September to February') . "\n";
+        }
 
         // Propagation info
         if (!empty($plant['is_propagation'])) {
@@ -566,88 +352,86 @@ INST;
     }
 
     /**
-     * Send chat request to Claude API
+     * Send a multi-turn chat request to Claude.
      */
-    private function sendChatRequest(array $messages, int $maxTokens = 1024): ?string
+    private function sendChatRequest(array $messages, int $maxTokens = 8000): ?string
     {
-        if (!$this->apiKey) {
-            throw new Exception('Claude API key not configured');
-        }
-
-        $data = [
+        return $this->callApi([
             'model' => $this->model,
             'max_tokens' => $maxTokens,
-            'messages' => $messages
-        ];
-
-        $ch = curl_init($this->apiUrl);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => [
-                'Content-Type: application/json',
-                'x-api-key: ' . $this->apiKey,
-                'anthropic-version: 2023-06-01'
-            ],
-            CURLOPT_POSTFIELDS => json_encode($data),
-            CURLOPT_TIMEOUT => 60
+            'messages' => $messages,
         ]);
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        curl_close($ch);
-
-        if ($error) {
-            throw new Exception('API request failed: ' . $error);
-        }
-
-        if ($httpCode !== 200) {
-            $errorData = json_decode($response, true);
-            throw new Exception('API error: ' . ($errorData['error']['message'] ?? 'Unknown error'));
-        }
-
-        $result = json_decode($response, true);
-        return $result['content'][0]['text'] ?? null;
     }
 
     /**
-     * Send request to Claude API (single-turn)
+     * Send a single-turn request to Claude. With a schema, the reply is
+     * constrained to valid JSON matching it (structured outputs).
      */
-    private function sendRequest(array $content, int $maxTokens = 1024): ?string
+    private function sendRequest(array $content, int $maxTokens = 8000, ?array $schema = null): ?string
     {
-        if (!$this->apiKey) {
-            throw new Exception('Claude API key not configured');
-        }
-
         $data = [
             'model' => $this->model,
             'max_tokens' => $maxTokens,
             'messages' => [
-                [
-                    'role' => 'user',
-                    'content' => $content
-                ]
-            ]
-        ];
-
-        $ch = curl_init($this->apiUrl);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => [
-                'Content-Type: application/json',
-                'x-api-key: ' . $this->apiKey,
-                'anthropic-version: 2023-06-01'
+                ['role' => 'user', 'content' => $content],
             ],
-            CURLOPT_POSTFIELDS => json_encode($data),
-            CURLOPT_TIMEOUT => 60
-        ]);
+        ];
+        if ($schema) {
+            $data['output_config'] = ['format' => ['type' => 'json_schema', 'schema' => $schema]];
+        }
+        return $this->callApi($data);
+    }
 
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        curl_close($ch);
+    /**
+     * POST to the Messages API and return the reply's text.
+     *
+     * Newer models think before answering, and the thinking counts toward
+     * max_tokens, which is why the limits here are much higher than before.
+     * Text is read from every text block, because a thinking block can come
+     * first. Opus 5.5 and Sonnet 5.5 requests opt into server-side fallback,
+     * so a rare safety decline is retried on another model automatically.
+     * Rate limits and overloads are retried twice with a short wait.
+     */
+    private function callApi(array $data): ?string
+    {
+        if (!$this->apiKey) {
+            throw new Exception('Claude API key not configured');
+        }
+
+        $headers = [
+            'Content-Type: application/json',
+            'x-api-key: ' . $this->apiKey,
+            'anthropic-version: 2023-06-01',
+        ];
+        if (in_array($this->model, self::FALLBACK_MODELS, true)) {
+            $headers[] = 'anthropic-beta: server-side-fallback-2026-07-01';
+            $data['fallbacks'] = 'default';
+        }
+
+        $attempt = 0;
+        while (true) {
+            $attempt++;
+            $ch = curl_init($this->apiUrl);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_HTTPHEADER => $headers,
+                CURLOPT_POSTFIELDS => json_encode($data),
+                CURLOPT_TIMEOUT => 180,
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $error = curl_error($ch);
+            curl_close($ch);
+
+            $retryable = $error || $httpCode === 429 || $httpCode >= 500;
+            if ($retryable && $attempt < 3) {
+                sleep(2 * $attempt);
+                continue;
+            }
+            break;
+        }
 
         if ($error) {
             throw new Exception('API request failed: ' . $error);
@@ -659,7 +443,23 @@ INST;
         }
 
         $result = json_decode($response, true);
-        return $result['content'][0]['text'] ?? null;
+        $stopReason = $result['stop_reason'] ?? null;
+        if ($stopReason === 'refusal') {
+            throw new Exception('The AI declined to answer this request.');
+        }
+
+        $text = '';
+        foreach ($result['content'] ?? [] as $block) {
+            if (($block['type'] ?? '') === 'text') {
+                $text .= $block['text'];
+            }
+        }
+
+        if ($stopReason === 'max_tokens' && isset($data['output_config'])) {
+            throw new Exception('The AI reply was cut off before it finished.');
+        }
+
+        return $text !== '' ? $text : null;
     }
 
     /**
@@ -743,7 +543,7 @@ PROMPT;
 
         $response = $this->sendRequest([
             ['type' => 'text', 'text' => $prompt]
-        ], 2048);
+        ], 8000);
 
         return $this->parseJsonResponse($response);
     }
@@ -854,7 +654,7 @@ PROMPT;
 
         $response = $this->sendRequest([
             ['type' => 'text', 'text' => $prompt]
-        ], 512);
+        ], 4000);
 
         return $this->parseJsonResponse($response);
     }

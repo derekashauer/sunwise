@@ -36,3 +36,6 @@ logs/
 *.md
 !CHANGELOG.md
 .claude/
+
+# Build archives
+*.zip

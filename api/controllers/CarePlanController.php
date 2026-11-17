@@ -12,12 +12,8 @@ class CarePlanController
     {
         $plantId = $params['id'];
 
-        // Verify plant ownership
-        $stmt = db()->prepare('SELECT * FROM plants WHERE id = ? AND user_id = ?');
-        $stmt->execute([$plantId, $userId]);
-        $plant = $stmt->fetch();
-
-        if (!$plant) {
+        // Owners and household members can view the plan
+        if (!CareScheduler::canAccessPlant((int) $plantId, $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
         }
 
@@ -33,17 +29,20 @@ class CarePlanController
 
         if (!$carePlan) {
             // Generate one if none exists
-            $carePlan = $this->generateCarePlan($plantId);
+            $carePlan = $this->generateCarePlan((int) $plantId, $userId);
+        }
+        if (!$carePlan) {
+            return ['status' => 404, 'data' => ['error' => 'Plant not found']];
         }
 
         // Get upcoming tasks for this plan
         $stmt = db()->prepare('
             SELECT * FROM tasks
-            WHERE care_plan_id = ? AND completed_at IS NULL AND skipped_at IS NULL
+            WHERE plant_id = ? AND completed_at IS NULL AND skipped_at IS NULL
             ORDER BY due_date ASC
             LIMIT 10
         ');
-        $stmt->execute([$carePlan['id']]);
+        $stmt->execute([$plantId]);
         $tasks = $stmt->fetchAll();
 
         return [
@@ -59,14 +58,11 @@ class CarePlanController
     {
         $plantId = $params['id'];
 
-        // Verify plant ownership
-        $stmt = db()->prepare('SELECT id FROM plants WHERE id = ? AND user_id = ?');
-        $stmt->execute([$plantId, $userId]);
-        if (!$stmt->fetch()) {
+        if (!CareScheduler::canAccessPlant((int) $plantId, $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
         }
 
-        $carePlan = $this->generateCarePlan($plantId, $userId);
+        $carePlan = $this->generateCarePlan((int) $plantId, $userId);
 
         return ['care_plan' => $carePlan, 'message' => 'Care plan regenerated'];
     }
@@ -78,10 +74,7 @@ class CarePlanController
     {
         $plantId = $params['id'];
 
-        // Verify plant ownership
-        $stmt = db()->prepare('SELECT id FROM plants WHERE id = ? AND user_id = ?');
-        $stmt->execute([$plantId, $userId]);
-        if (!$stmt->fetch()) {
+        if (!CareScheduler::canAccessPlant((int) $plantId, $userId)) {
             return ['status' => 404, 'data' => ['error' => 'Plant not found']];
         }
 
@@ -99,11 +92,14 @@ class CarePlanController
     }
 
     /**
-     * Generate care plan using AI
+     * Build a care plan with AI and swap it in for the plant's current plan.
+     *
+     * The AI call happens before anything changes. If it fails or returns
+     * something unusable, a sensible default plan is used instead, so a plant
+     * is never left without tasks.
      */
     public function generateCarePlan(int $plantId, ?int $userId = null): ?array
     {
-        // Get comprehensive plant details including location
         $stmt = db()->prepare('
             SELECT p.*, l.name as location_name, l.light_level as location_light
             FROM plants p
@@ -117,7 +113,10 @@ class CarePlanController
             return null;
         }
 
-        // Add location info to plant data for AI
+        $scheduler = new CareScheduler();
+        $today = Clock::today();
+        $season = Clock::season($today);
+
         if ($plant['location_name']) {
             $plant['location'] = $plant['location_name'];
             if ($plant['location_light']) {
@@ -125,7 +124,6 @@ class CarePlanController
             }
         }
 
-        // Get species care info if available and add to plant context
         if (!empty($plant['species_care_info'])) {
             $careInfo = json_decode($plant['species_care_info'], true);
             if ($careInfo) {
@@ -133,9 +131,9 @@ class CarePlanController
             }
         }
 
-        // Get recent care log with more detail
+        // Recent care, including the structured readings from checks
         $stmt = db()->prepare('
-            SELECT action, performed_at, notes, outcome
+            SELECT action, performed_at, notes, outcome, check_data
             FROM care_log
             WHERE plant_id = ?
             ORDER BY performed_at DESC
@@ -144,7 +142,6 @@ class CarePlanController
         $stmt->execute([$plantId]);
         $careLog = $stmt->fetchAll();
 
-        // Get most recent photo and its AI analysis for health context
         $stmt = db()->prepare('
             SELECT filename, ai_analysis, uploaded_at
             FROM photos
@@ -154,8 +151,6 @@ class CarePlanController
         ');
         $stmt->execute([$plantId]);
         $photo = $stmt->fetch();
-
-        // Add photo analysis to plant context if available
         if ($photo && !empty($photo['ai_analysis'])) {
             $photoAnalysis = json_decode($photo['ai_analysis'], true);
             if ($photoAnalysis) {
@@ -164,153 +159,102 @@ class CarePlanController
             }
         }
 
-        // Get any completed/skipped task info for context (what worked, what was skipped)
-        $stmt = db()->prepare('
-            SELECT task_type, COUNT(*) as count, MAX(completed_at) as last_completed
-            FROM tasks
-            WHERE plant_id = ? AND completed_at IS NOT NULL
-            GROUP BY task_type
-        ');
+        // When each kind of care was last actually done. The care log covers
+        // tasks, manual logs and sitter visits, so it's the most complete record.
+        $stmt = db()->prepare("
+            SELECT action, COUNT(*) AS count, MAX(performed_at) AS last_done
+            FROM care_log
+            WHERE plant_id = ? AND action NOT LIKE 'skipped_%' AND action NOT LIKE 'schedule_adjusted_%'
+            GROUP BY action
+        ");
         $stmt->execute([$plantId]);
-        $completedTaskStats = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        if (!empty($completedTaskStats)) {
-            $plant['care_history_stats'] = $completedTaskStats;
+        $lastDone = [];
+        $stats = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $taskType = CareScheduler::ACTION_TO_TASK[$row['action']] ?? ($row['action'] === 'check' ? 'check' : null);
+            if (!$taskType) {
+                continue;
+            }
+            $localDate = Clock::utcToLocalDate($row['last_done']);
+            if (!isset($lastDone[$taskType]) || $localDate > $lastDone[$taskType]) {
+                $lastDone[$taskType] = $localDate;
+            }
+            $stats[] = ['task_type' => $taskType, 'count' => (int) $row['count'], 'last_completed' => $localDate];
+        }
+        if (!empty($stats)) {
+            $plant['care_history_stats'] = $stats;
         }
 
-        // Remember most recent completion date per task type (to avoid scheduling too soon)
-        $stmt = db()->prepare('
-            SELECT task_type, MAX(completed_at) as last_completed,
-                   json_extract(recurrence, "$.interval") as last_interval
-            FROM tasks
-            WHERE plant_id = ? AND completed_at IS NOT NULL
-            GROUP BY task_type
-        ');
-        $stmt->execute([$plantId]);
-        $recentCompletions = [];
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $recentCompletions[$row['task_type']] = [
-                'date' => substr($row['last_completed'], 0, 10),
-                'interval' => (int)($row['last_interval'] ?? 7)
-            ];
-        }
+        // The owner's preferences and hand-set intervals
+        $settings = $scheduler->ownerSettings($plantId);
+        $overrides = CareScheduler::overrides($plantId);
+        $stmt = db()->prepare('SELECT climate_notes FROM users WHERE id = ?');
+        $stmt->execute([$plant['user_id']]);
+        $plant['climate_notes'] = $stmt->fetchColumn() ?: null;
+        $plant['fertilizer_method'] = $settings['fertilizer_method'];
+        $plant['winter_rest'] = $settings['winter_rest'];
+        $plant['schedule_overrides'] = $overrides;
+        $plant['last_repot_date'] = $lastDone['repot'] ?? ($lastDone['pot_up'] ?? null);
 
-        // Determine season
-        $month = (int) date('n');
-        if ($month >= 3 && $month <= 5) {
-            $season = 'spring';
-        } elseif ($month >= 6 && $month <= 8) {
-            $season = 'summer';
-        } elseif ($month >= 9 && $month <= 11) {
-            $season = 'fall';
-        } else {
-            $season = 'winter';
-        }
-
-        // Generate care plan with AI BEFORE mutating any state — if the AI call (or
-        // anything else here) throws, we leave the plant's existing plan and tasks
-        // alone. Previously this ran AFTER deactivating + deleting, which left plants
-        // orphaned (no active plan, no pending tasks) on partial failure.
+        $effectiveUserId = $userId ?? (int) $plant['user_id'];
+        $aiPlan = null;
         try {
-            $effectiveUserId = $userId ?? $plant['user_id'];
             $aiService = AIServiceFactory::getForUser($effectiveUserId);
             $aiPlan = $aiService->generateCarePlan($plant, $careLog, $season);
+            if (!is_array($aiPlan) || empty($aiPlan['tasks']) || !is_array($aiPlan['tasks'])) {
+                throw new Exception('AI returned no usable care plan');
+            }
             ClaudeService::logUsage($effectiveUserId, 'care_plan', true, null, $aiService->getModel());
         } catch (Exception $e) {
             error_log('AI care plan generation failed: ' . $e->getMessage());
-            ClaudeService::logUsage($userId ?? $plant['user_id'], 'care_plan', false, $e->getMessage());
+            ClaudeService::logUsage($effectiveUserId, 'care_plan', false, $e->getMessage());
             $aiPlan = $this->getDefaultCarePlan($plant, $season);
         }
 
-        // Get user's enabled task types
-        $enabledTaskTypes = $this->getEnabledTaskTypes($plant['user_id']);
+        $tasks = $this->prepareTasks($aiPlan['tasks'], $plant, $lastDone, $overrides, $settings, $today, $scheduler);
 
         // Atomic swap: deactivate old plans + delete pending tasks + create new plan + tasks.
-        // Rolls back on any error so we never end up with a half-applied state.
         $db = db();
         $db->beginTransaction();
         try {
-            $stmt = $db->prepare('UPDATE care_plans SET is_active = 0 WHERE plant_id = ?');
-            $stmt->execute([$plantId]);
-
-            $stmt = $db->prepare('
+            $db->prepare('UPDATE care_plans SET is_active = 0 WHERE plant_id = ?')->execute([$plantId]);
+            $db->prepare('
                 DELETE FROM tasks
-                WHERE plant_id = ?
-                  AND completed_at IS NULL
-                  AND skipped_at IS NULL
-            ');
-            $stmt->execute([$plantId]);
+                WHERE plant_id = ? AND completed_at IS NULL AND skipped_at IS NULL
+            ')->execute([$plantId]);
 
-            $stmt = $db->prepare('
+            $nextPhotoCheck = $aiPlan['next_photo_check'] ?? null;
+            if (!is_string($nextPhotoCheck) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $nextPhotoCheck)) {
+                $nextPhotoCheck = Clock::addDays($today, 14);
+            }
+
+            $db->prepare('
                 INSERT INTO care_plans (plant_id, season, ai_reasoning, next_photo_check, photo_check_reason, valid_until)
                 VALUES (?, ?, ?, ?, ?, ?)
-            ');
-            $stmt->execute([
+            ')->execute([
                 $plantId,
                 $season,
                 $aiPlan['reasoning'] ?? null,
-                $aiPlan['next_photo_check'] ?? date('Y-m-d', strtotime('+14 days')),
+                $nextPhotoCheck,
                 $aiPlan['photo_check_reason'] ?? 'Regular health check',
-                date('Y-m-d', strtotime('+3 months'))
+                Clock::addDays($today, 90),
             ]);
-            $carePlanId = $db->lastInsertId();
+            $carePlanId = (int) $db->lastInsertId();
 
-            // Create tasks from AI plan (filter by enabled types)
-            if (!empty($aiPlan['tasks'])) {
-                foreach ($aiPlan['tasks'] as $task) {
-                    // Skip if task type is disabled
-                    if (!in_array($task['type'], $enabledTaskTypes)) {
-                        continue;
-                    }
-
-                    // Skip rotate tasks if plant's can_rotate is false
-                    if ($task['type'] === 'rotate' && isset($plant['can_rotate']) && !$plant['can_rotate']) {
-                        continue;
-                    }
-
-                    // Enforce minimum check interval of 7 days
-                    if ($task['type'] === 'check' && isset($task['recurrence']['interval']) && $task['recurrence']['interval'] < 7) {
-                        $task['recurrence']['interval'] = 7;
-                    }
-
-                    // Propagation task validation
-                    if (!empty($plant['is_propagation'])) {
-                        // Water propagations: no water, fertilize, or rotate tasks
-                        if ($plant['soil_type'] === 'water' && in_array($task['type'], ['water', 'fertilize', 'rotate'])) {
-                            continue;
-                        }
-                        // Rooting medium propagations: no change_water tasks
-                        if ($plant['soil_type'] !== 'water' && $task['type'] === 'change_water') {
-                            continue;
-                        }
-                    }
-
-                    // Adjust due date if this task type was recently completed
-                    $dueDate = $task['due_date'];
-                    if (isset($recentCompletions[$task['type']])) {
-                        $lastDone = $recentCompletions[$task['type']]['date'];
-                        $interval = isset($task['recurrence']['interval']) ? $task['recurrence']['interval'] : ($recentCompletions[$task['type']]['interval'] ?? 7);
-                        $earliestNext = date('Y-m-d', strtotime("$lastDone +$interval days"));
-                        $today = date('Y-m-d');
-                        // Don't schedule before the interval has elapsed since last completion
-                        if ($dueDate < $earliestNext) {
-                            $dueDate = max($earliestNext, $today);
-                        }
-                    }
-
-                    $stmt = $db->prepare('
-                        INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, instructions, priority)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ');
-                    $stmt->execute([
-                        $carePlanId,
-                        $plantId,
-                        $task['type'],
-                        $dueDate,
-                        isset($task['recurrence']) ? json_encode($task['recurrence']) : null,
-                        $task['instructions'] ?? null,
-                        $task['priority'] ?? 'normal'
-                    ]);
-                }
+            $insert = $db->prepare('
+                INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, instructions, priority)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ');
+            foreach ($tasks as $task) {
+                $insert->execute([
+                    $carePlanId,
+                    $plantId,
+                    $task['type'],
+                    $task['due_date'],
+                    json_encode(['type' => 'days', 'interval' => $task['interval']]),
+                    $task['instructions'],
+                    $task['priority'],
+                ]);
             }
 
             $db->commit();
@@ -320,11 +264,102 @@ class CarePlanController
             throw $e;
         }
 
-        // Get created care plan
         $stmt = db()->prepare('SELECT * FROM care_plans WHERE id = ?');
         $stmt->execute([$carePlanId]);
 
-        return $stmt->fetch();
+        return $stmt->fetch() ?: null;
+    }
+
+    /**
+     * Turn the AI's task list into safe rows: known types only, one per type,
+     * the owner's intervals, fertilizer rules, and due dates that respect
+     * when the care was last done. Adds water and check tasks if the AI left
+     * them out, so the plan is never "half baked".
+     */
+    private function prepareTasks(array $aiTasks, array $plant, array $lastDone, array $overrides, array $settings, string $today, CareScheduler $scheduler): array
+    {
+        $enabled = $this->getEnabledTaskTypes((int) $plant['user_id']);
+        $isWaterProp = !empty($plant['is_propagation']) && $plant['soil_type'] === 'water';
+        $isSoilProp = !empty($plant['is_propagation']) && $plant['soil_type'] !== 'water';
+
+        // Make sure the basics exist even if the AI skipped them
+        $types = array_map(fn($t) => $t['type'] ?? null, $aiTasks);
+        $defaults = $this->getDefaultCarePlan($plant, Clock::season($today))['tasks'];
+        foreach ($defaults as $default) {
+            if (in_array($default['type'], ['water', 'check', 'change_water'], true) && !in_array($default['type'], $types, true)) {
+                $aiTasks[] = $default;
+            }
+        }
+
+        $out = [];
+        foreach ($aiTasks as $task) {
+            $type = $task['type'] ?? null;
+            if (!is_string($type) || !in_array($type, CareScheduler::TASK_TYPES, true) || isset($out[$type])) {
+                continue;
+            }
+            if (!in_array($type, $enabled, true)) {
+                continue;
+            }
+            if ($type === 'rotate' && isset($plant['can_rotate']) && !$plant['can_rotate']) {
+                continue;
+            }
+            if ($isWaterProp && in_array($type, ['water', 'fertilize', 'rotate'], true)) {
+                continue;
+            }
+            if (!$isWaterProp && $type === 'change_water') {
+                continue;
+            }
+            if ($isSoilProp && $type === 'fertilize') {
+                continue;
+            }
+
+            // Interval: owner's override, then the AI's, kept to sane bounds
+            $interval = (int) ($task['recurrence']['interval'] ?? 7);
+            if (($task['recurrence']['type'] ?? 'days') === 'weeks') {
+                $interval *= 7;
+            } elseif (($task['recurrence']['type'] ?? 'days') === 'months') {
+                $interval *= 30;
+            }
+            $interval = max(1, min(365, $interval));
+            if ($type === 'check') {
+                $interval = max(7, $interval);
+            }
+            if ($type === 'fertilize' && $settings['fertilizer_method'] === 'separate' && $interval < CareScheduler::SEPARATE_FERTILIZE_MIN_INTERVAL) {
+                $interval = CareScheduler::SEPARATE_FERTILIZE_INTERVAL;
+            }
+            if (isset($overrides[$type])) {
+                $interval = $overrides[$type];
+            }
+
+            // Due date: what the AI said, but never in the past and never
+            // sooner than one interval after the care was last done
+            $due = $task['due_date'] ?? $today;
+            if (!is_string($due) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $due)) {
+                $due = $today;
+            }
+            if (isset($lastDone[$type])) {
+                $earliest = Clock::addDays($lastDone[$type], $interval);
+                if ($due < $earliest) {
+                    $due = $earliest;
+                }
+            }
+            if ($due < $today) {
+                $due = $today;
+            }
+            $due = $scheduler->normalizeDueDate(['task_type' => $type, 'plant_id' => $plant['id']], $due);
+
+            $priority = in_array($task['priority'] ?? 'normal', ['low', 'normal', 'high', 'urgent'], true) ? $task['priority'] : 'normal';
+
+            $out[$type] = [
+                'type' => $type,
+                'due_date' => $due,
+                'interval' => $interval,
+                'instructions' => isset($task['instructions']) ? (string) $task['instructions'] : null,
+                'priority' => $priority,
+            ];
+        }
+
+        return array_values($out);
     }
 
     /**
@@ -332,55 +367,69 @@ class CarePlanController
      */
     private function getEnabledTaskTypes(int $userId): array
     {
-        // All default task types
-        $allTypes = ['water', 'fertilize', 'mist', 'rotate', 'trim', 'repot', 'check', 'change_water', 'check_roots', 'pot_up'];
-
-        // Get user's disabled types
-        $stmt = db()->prepare('SELECT task_type FROM task_type_settings WHERE user_id = ? AND enabled = 0');
-        $stmt->execute([$userId]);
-        $disabledTypes = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-        // Return types that are not disabled
-        return array_diff($allTypes, $disabledTypes);
+        return array_values(array_diff(CareScheduler::TASK_TYPES, CareScheduler::disabledTypes($userId)));
     }
 
     /**
-     * Get default care plan if AI fails
+     * Default care plan when AI is unavailable or returns nothing usable.
      */
     private function getDefaultCarePlan(array $plant, string $season): array
     {
-        $today = date('Y-m-d');
-
-        // Adjust watering based on season
+        $today = Clock::today();
         $waterInterval = $season === 'summer' ? 5 : ($season === 'winter' ? 10 : 7);
+        $separate = ($plant['fertilizer_method'] ?? 'separate') === 'separate';
+        $isWaterProp = !empty($plant['is_propagation']) && ($plant['soil_type'] ?? '') === 'water';
+
+        $tasks = [];
+        if ($isWaterProp) {
+            $tasks[] = [
+                'type' => 'change_water',
+                'due_date' => Clock::addDays($today, 3),
+                'recurrence' => ['type' => 'days', 'interval' => 5],
+                'instructions' => 'Swap in fresh room-temperature water',
+                'priority' => 'normal',
+            ];
+        } else {
+            $tasks[] = [
+                'type' => 'water',
+                'due_date' => $today,
+                'recurrence' => ['type' => 'days', 'interval' => $waterInterval],
+                'instructions' => 'Water thoroughly until water drains from the bottom, once the top inch of soil is dry',
+                'priority' => 'normal',
+            ];
+        }
+
+        $tasks[] = [
+            'type' => 'check',
+            'due_date' => Clock::addDays($today, 3),
+            'recurrence' => ['type' => 'days', 'interval' => 7],
+            'instructions' => 'Check soil moisture and leaf condition',
+            'priority' => 'low',
+        ];
+
+        if (!$isWaterProp) {
+            $tasks[] = $separate
+                ? [
+                    'type' => 'fertilize',
+                    'due_date' => Clock::addDays($today, 14),
+                    'recurrence' => ['type' => 'days', 'interval' => CareScheduler::SEPARATE_FERTILIZE_INTERVAL],
+                    'instructions' => 'Top-dress with slow-release granules (Osmocote Plus) at the label rate for this pot size and scratch in lightly',
+                    'priority' => 'low',
+                ]
+                : [
+                    'type' => 'fertilize',
+                    'due_date' => Clock::addDays($today, 14),
+                    'recurrence' => ['type' => 'days', 'interval' => $season === 'winter' ? 60 : 30],
+                    'instructions' => 'Apply balanced liquid fertilizer at half strength',
+                    'priority' => 'low',
+                ];
+        }
 
         return [
             'reasoning' => 'Default care plan based on general houseplant guidelines',
-            'next_photo_check' => date('Y-m-d', strtotime('+14 days')),
+            'next_photo_check' => Clock::addDays($today, 14),
             'photo_check_reason' => 'Regular health check',
-            'tasks' => [
-                [
-                    'type' => 'water',
-                    'due_date' => $today,
-                    'recurrence' => ['type' => 'days', 'interval' => $waterInterval],
-                    'instructions' => 'Water thoroughly until water drains from bottom',
-                    'priority' => 'normal'
-                ],
-                [
-                    'type' => 'check',
-                    'due_date' => date('Y-m-d', strtotime('+3 days')),
-                    'recurrence' => ['type' => 'days', 'interval' => 7],
-                    'instructions' => 'Check soil moisture and leaf condition',
-                    'priority' => 'low'
-                ],
-                [
-                    'type' => 'fertilize',
-                    'due_date' => date('Y-m-d', strtotime('+14 days')),
-                    'recurrence' => ['type' => 'days', 'interval' => $season === 'winter' ? 60 : 30],
-                    'instructions' => 'Apply balanced liquid fertilizer at half strength',
-                    'priority' => 'low'
-                ]
-            ]
+            'tasks' => $tasks,
         ];
     }
 }

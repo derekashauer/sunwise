@@ -1,0 +1,24 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_sqlite, openssl, curl
+
+      - name: Lint PHP
+        run: find api -name '*.php' -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Run scheduler tests
+        run: php api/tests/run.php
