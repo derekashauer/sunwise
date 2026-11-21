@@ -2,6 +2,16 @@
 
 All notable changes to Sunwise are documented in this file.
 
+## [0.15.1] - 2026-11-21
+
+### Fixed
+- **A check that said "water now" didn't add a watering task** - The AI's check advice was only shown as text, and the app moved watering to today only when soil read 2/10 or drier and watering was at least 2 days away. Now a dry reading (3/10 or less), or the AI saying the plant needs water today, puts watering on today's list. It moves the next watering task to today, or adds one if there isn't one. That date is pinned, so the daily cleanup won't push it back out because the plant was watered a few days ago
+- **Pop-ups after a check covered the task list** - Every check note was its own pop-up lasting up to 10 seconds, so a check with issues stacked several over the screen. A check now shows one pop-up with a "See notes" button that opens all the notes in one sheet. Pop-ups also never stack more than three deep
+
+### Changed
+- **AI interval suggestions are offered, not applied** - When the AI thinks watering should be more or less often, the notes sheet shows a "Water every N days" button instead of changing the schedule on its own
+- **Check analysis uses one shared prompt** for both AI providers, with structured outputs, like care plans
+
 ## [0.15.0] - 2026-11-16
 
 ### Fixed

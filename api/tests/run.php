@@ -455,6 +455,51 @@ test('a bone-dry check pulls watering to today', function () {
     same(Clock::today(), task($water)['due_date'], 'watering moved to today');
 });
 
+test('a dry check moves tomorrow\'s watering to today and it stays there', function () {
+    $user = makeUser();
+    $plant = makePlant($user);
+    $water = makeTask($plant, 'water', Clock::daysFromToday(1), 7);
+    $check = makeTask($plant, 'check', Clock::today(), 7);
+    logCare($plant, 'water', Clock::daysFromToday(-3) . ' 18:00:00');
+
+    $result = (new TaskController())->complete(['id' => $check], ['check_data' => ['moisture_level' => 3, 'general_health' => 4]], $user);
+
+    same(Clock::today(), task($water)['due_date'], 'watering moved to today');
+    check(!empty($result['tasks_changed']), 'app is told the list changed');
+    check(str_contains(implode(' ', array_column($result['insights'], 'message')), "today's list"), 'insight says watering is on today\'s list');
+
+    (new CareScheduler())->reconcile($user);
+    same(Clock::today(), task($water)['due_date'], 'daily cleanup leaves the pinned date alone');
+});
+
+test('a dry check adds a water task when there is none', function () {
+    $user = makeUser();
+    $plant = makePlant($user);
+    $check = makeTask($plant, 'check', Clock::today(), 7);
+
+    (new TaskController())->complete(['id' => $check], ['check_data' => ['moisture_level' => 2, 'general_health' => 3]], $user);
+
+    $water = pending($plant, 'water');
+    same(1, count($water), 'one water task created');
+    same(Clock::today(), $water[0]['due_date'], 'due today');
+});
+
+test('no water task is added when watering is turned off', function () {
+    $user = makeUser();
+    $plant = makePlant($user);
+    db()->prepare('INSERT INTO task_type_settings (user_id, task_type, enabled) VALUES (?, ?, 0)')->execute([$user, 'water']);
+    same(null, (new TaskController())->ensureWaterToday($plant, $user), 'nothing done');
+    same(0, count(pending($plant, 'water')), 'no task');
+});
+
+test('check analysis prompt asks for a water-now answer', function () {
+    $prompt = CheckInsightPrompt::build(['moisture_level' => 3], [], ['species' => 'Ficus'], [['task_type' => 'water', 'due_date' => '2026-11-25', 'recurrence_interval' => 7]]);
+    check(str_contains($prompt, 'water_now'), 'prompt explains water_now');
+    check(str_contains($prompt, 'next due 2026-11-25'), 'prompt includes the next due date');
+    $schema = CheckInsightPrompt::schema();
+    check(in_array('water_now', $schema['required'], true), 'schema requires water_now');
+});
+
 test('check readings reach the care plan prompt', function () {
     $prompt = CarePlanPrompt::build(
         ['species' => 'Pothos', 'climate_notes' => 'Colorado Front Range, dry winter air', 'fertilizer_method' => 'separate', 'winter_rest' => true],

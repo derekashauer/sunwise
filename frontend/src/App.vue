@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useTasksStore } from '@/stores/tasks'
 import BottomNav from '@/components/common/BottomNav.vue'
 import Toast from '@/components/common/Toast.vue'
+import CheckResultsSheet from '@/components/tasks/CheckResultsSheet.vue'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -71,6 +72,7 @@ watch(() => auth.isAuthenticated, (isAuthed) => {
 
     <BottomNav v-if="showNav" />
     <Toast />
+    <CheckResultsSheet />
   </div>
 </template>
 
