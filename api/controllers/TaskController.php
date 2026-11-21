@@ -10,6 +10,9 @@ class TaskController
 {
     private CareScheduler $scheduler;
 
+    /** The AI's structured answer for the check being saved, if any. */
+    private ?array $lastAiCheck = null;
+
     public function __construct()
     {
         $this->scheduler = new CareScheduler();
@@ -161,6 +164,9 @@ class TaskController
             }
             if ($analysis['care_plan_updated']) {
                 $response['care_plan_updated'] = true;
+            }
+            if ($analysis['tasks_changed']) {
+                $response['tasks_changed'] = true;
             }
         }
 
@@ -350,6 +356,77 @@ class TaskController
     }
 
     /**
+     * Make sure the plant has a watering task due today.
+     *
+     * @return string|null 'moved' (pending task pulled to today), 'created'
+     *                     (new task added), 'already' (already due), or null
+     *                     when watering doesn't apply (turned off in
+     *                     Settings, or a water propagation).
+     */
+    public function ensureWaterToday(int $plantId, int $userId): ?string
+    {
+        if (in_array('water', CareScheduler::disabledTypes($userId), true)) {
+            return null;
+        }
+
+        $stmt = db()->prepare('SELECT is_propagation, soil_type FROM plants WHERE id = ?');
+        $stmt->execute([$plantId]);
+        $plant = $stmt->fetch();
+        if (!$plant || (!empty($plant['is_propagation']) && $plant['soil_type'] === 'water')) {
+            return null;
+        }
+
+        $today = Clock::today();
+        $stmt = db()->prepare('
+            SELECT id FROM tasks
+            WHERE plant_id = ? AND task_type = "water" AND completed_at IS NULL AND skipped_at IS NULL
+            ORDER BY due_date ASC LIMIT 1
+        ');
+        $stmt->execute([$plantId]);
+        $pendingId = $stmt->fetchColumn();
+
+        if ($pendingId) {
+            $pending = CareScheduler::loadTask((int) $pendingId);
+            if ($pending['due_date'] <= $today) {
+                db()->prepare('UPDATE tasks SET due_pinned = 1 WHERE id = ?')->execute([$pending['id']]);
+                return 'already';
+            }
+            $this->scheduler->snooze($pending, $today, true);
+            return 'moved';
+        }
+
+        // No pending water task: start one from the last water task, the
+        // owner's interval, or a weekly default
+        $stmt = db()->prepare('SELECT * FROM tasks WHERE plant_id = ? AND task_type = "water" ORDER BY id DESC LIMIT 1');
+        $stmt->execute([$plantId]);
+        $last = $stmt->fetch() ?: null;
+
+        $overrides = CareScheduler::overrides($plantId);
+        $interval = $overrides['water'] ?? ($last ? CareScheduler::recurrenceDays($last['recurrence']) : null) ?? 7;
+
+        $carePlanId = $last['care_plan_id'] ?? null;
+        if (!$carePlanId) {
+            $stmt = db()->prepare('SELECT id FROM care_plans WHERE plant_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1');
+            $stmt->execute([$plantId]);
+            $carePlanId = $stmt->fetchColumn() ?: null;
+        }
+
+        db()->prepare('
+            INSERT INTO tasks (care_plan_id, plant_id, task_type, due_date, recurrence, instructions, priority, due_pinned)
+            VALUES (?, ?, "water", ?, ?, ?, ?, 1)
+        ')->execute([
+            $carePlanId,
+            $plantId,
+            $today,
+            json_encode(['type' => 'days', 'interval' => $interval]),
+            $last['instructions'] ?? 'Water thoroughly until water drains from the bottom',
+            'high',
+        ]);
+
+        return 'created';
+    }
+
+    /**
      * Adjust the water task from a check's moisture reading, and rebuild the
      * care plan only when health is poor or pests showed up.
      */
@@ -381,27 +458,39 @@ class TaskController
             }
         }
 
-        $stmt = db()->prepare('
-            SELECT id FROM tasks
-            WHERE plant_id = ? AND task_type = "water" AND completed_at IS NULL AND skipped_at IS NULL
-            ORDER BY due_date ASC LIMIT 1
-        ');
-        $stmt->execute([$plantId]);
-        $waterId = $stmt->fetchColumn();
-        $water = $waterId ? CareScheduler::loadTask((int) $waterId) : null;
+        $tasksChanged = $carePlanUpdated;
+        $ai = $this->lastAiCheck ?? [];
 
-        if ($water && $moisture !== null) {
-            $daysUntil = Clock::daysBetween($today, $water['due_date']);
-            $interval = $this->scheduler->intervalFor($water) ?: 7;
+        // Water today when the soil reads dry (3/10 or less), or when the AI
+        // says so and the soil isn't moist. A wet reading always wins.
+        $waterNow = ($moisture !== null && $moisture <= 3)
+            || (!empty($ai['water_now']) && ($moisture === null || $moisture < 6));
 
-            if ($moisture <= 2 && $daysUntil >= 2) {
-                // Bone dry and watering is days away: water today instead
-                $this->scheduler->snooze($water, $today);
-                $insights[] = [
-                    'type' => 'warning',
-                    'message' => "Soil is very dry ({$moisture}/10), so watering moved to today instead of in {$daysUntil} days.",
-                ];
-            } elseif ($moisture >= 7) {
+        if ($waterNow) {
+            $result = $this->ensureWaterToday($plantId, $userId);
+            $soil = $moisture !== null ? " (soil {$moisture}/10)" : '';
+            if ($result === 'moved') {
+                $insights[] = ['type' => 'warning', 'message' => "Water it today{$soil}. Watering moved to today's list."];
+                $tasksChanged = true;
+            } elseif ($result === 'created') {
+                $insights[] = ['type' => 'warning', 'message' => "Water it today{$soil}. Added a watering task to today's list."];
+                $tasksChanged = true;
+            } elseif ($result === 'already') {
+                $insights[] = ['type' => 'warning', 'message' => "Water it today{$soil}. Watering is already on today's list."];
+            }
+        } elseif ($moisture !== null && $moisture >= 7) {
+            $stmt = db()->prepare('
+                SELECT id FROM tasks
+                WHERE plant_id = ? AND task_type = "water" AND completed_at IS NULL AND skipped_at IS NULL
+                ORDER BY due_date ASC LIMIT 1
+            ');
+            $stmt->execute([$plantId]);
+            $waterId = $stmt->fetchColumn();
+            $water = $waterId ? CareScheduler::loadTask((int) $waterId) : null;
+
+            if ($water) {
+                $daysUntil = Clock::daysBetween($today, $water['due_date']);
+                $interval = $this->scheduler->intervalFor($water) ?: 7;
                 $delay = self::wetSoilDelay($moisture, $interval);
                 if ($daysUntil <= 0) {
                     $this->scheduler->skip($water, $userId, "Auto-skipped: check reported wet soil ({$moisture}/10)", 'skip', $delay);
@@ -409,17 +498,45 @@ class TaskController
                         'type' => 'info',
                         'message' => "Soil is still wet ({$moisture}/10), so today's watering was skipped. Next watering in {$delay} days.",
                     ];
+                    $tasksChanged = true;
                 } elseif ($daysUntil < $delay) {
                     $this->scheduler->snooze($water, Clock::addDays($today, $delay));
                     $insights[] = [
                         'type' => 'info',
                         'message' => "Soil is still wet ({$moisture}/10), so watering moved out to {$delay} days from now.",
                     ];
+                    $tasksChanged = true;
                 }
             }
         }
 
-        return ['insights' => $insights, 'care_plan_updated' => $carePlanUpdated];
+        // A suggested new watering interval is offered, not applied silently
+        if (!empty($ai['water_interval_days'])) {
+            $suggested = max(1, min(60, (int) $ai['water_interval_days']));
+            $stmt = db()->prepare('
+                SELECT * FROM tasks WHERE plant_id = ? AND task_type = "water"
+                ORDER BY (completed_at IS NULL AND skipped_at IS NULL) DESC, id DESC LIMIT 1
+            ');
+            $stmt->execute([$plantId]);
+            $waterTask = $stmt->fetch();
+            $current = $waterTask ? $this->scheduler->intervalFor($waterTask) : null;
+            if ($current !== $suggested) {
+                $insights[] = [
+                    'type' => 'info',
+                    'message' => $current
+                        ? "Suggested: water every {$suggested} days instead of every {$current}."
+                        : "Suggested: water every {$suggested} days.",
+                    'suggestion' => [
+                        'action' => 'adjust_watering',
+                        'task_type' => 'water',
+                        'interval_days' => $suggested,
+                        'current_interval_days' => $current,
+                    ],
+                ];
+            }
+        }
+
+        return ['insights' => $insights, 'care_plan_updated' => $carePlanUpdated, 'tasks_changed' => $tasksChanged];
     }
 
 
@@ -459,7 +576,7 @@ class TaskController
         // Moisture extremes
         $moisture = (int) ($checkData['moisture_level'] ?? 5);
         if ($moisture <= 2) {
-            $insights[] = ['type' => 'info', 'message' => 'Soil is very dry. May need watering soon.'];
+            // The watering step after this puts water on today's list
             $concernCount++;
         } elseif ($moisture >= 9) {
             $insights[] = ['type' => 'warning', 'message' => 'Soil is very wet. Watch for signs of overwatering.'];
@@ -486,8 +603,13 @@ class TaskController
         if ($triggerAI) {
             try {
                 $aiInsight = $this->getAICheckInsight($checkData, $plantId, $userId);
-                if ($aiInsight) {
-                    $insights[] = $aiInsight;
+                if ($aiInsight && !empty($aiInsight['message'])) {
+                    $this->lastAiCheck = $aiInsight;
+                    $insights[] = [
+                        'type' => in_array($aiInsight['type'] ?? 'info', ['info', 'warning', 'success'], true) ? $aiInsight['type'] : 'info',
+                        'message' => (string) $aiInsight['message'],
+                        'suggestion' => $aiInsight['suggestion'] ?? null,
+                    ];
                 }
             } catch (Exception $e) {
                 error_log('AI check analysis failed: ' . $e->getMessage());

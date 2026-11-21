@@ -163,7 +163,7 @@ export const useTasksStore = defineStore('tasks', () => {
     return summaryParts.join('. ')
   }
 
-  /** Complete a check task with its structured data. Returns { task, insights, queued }. */
+  /** Complete a check task with its structured data. Returns { task, insights, tasksChanged, queued }. */
   async function completeCheckTask(taskId, checkData) {
     const notes = buildCheckNotes(checkData)
     const { response, queued, outboxId } = await runOrQueue({
@@ -182,6 +182,7 @@ export const useTasksStore = defineStore('tasks', () => {
     return {
       task: findTask(taskId) || response.task,
       insights: response.insights || [],
+      tasksChanged: !!response.tasks_changed,
       carePlanUpdated: !!response.care_plan_updated,
       queued: false
     }

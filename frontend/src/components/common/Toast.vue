@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 
 const DEFAULT_DURATION = 3500
+const MAX_VISIBLE = 3
 
 const toasts = ref([])
 let toastId = 0
@@ -21,6 +22,11 @@ function show(message, options = {}) {
   const duration = options.duration ?? (action ? 5000 : DEFAULT_DURATION)
 
   toasts.value.push({ id, message, type, action })
+
+  // Never let pop-ups pile up over the page: keep the newest few
+  while (toasts.value.length > MAX_VISIBLE) {
+    removeToast(toasts.value[0].id)
+  }
 
   if (duration > 0) {
     timers.set(id, setTimeout(() => removeToast(id), duration))

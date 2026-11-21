@@ -483,12 +483,13 @@ class CareScheduler
     }
 
     /**
-     * Move a pending task to another day without logging a skip.
+     * Move a pending task to another day without logging a skip. A pinned
+     * date is one the daily cleanup won't move.
      */
-    public function snooze(array $task, string $date): array
+    public function snooze(array $task, string $date, bool $pin = false): array
     {
-        db()->prepare('UPDATE tasks SET due_date = ? WHERE id = ? AND completed_at IS NULL AND skipped_at IS NULL')
-            ->execute([$date, $task['id']]);
+        db()->prepare('UPDATE tasks SET due_date = ?, due_pinned = ? WHERE id = ? AND completed_at IS NULL AND skipped_at IS NULL')
+            ->execute([$date, $pin ? 1 : 0, $task['id']]);
         return self::loadTask((int) $task['id']);
     }
 
@@ -572,7 +573,7 @@ class CareScheduler
         }
         $typePlaceholders = implode(',', array_fill(0, count($activeTypes), '?'));
 
-        // 2. Recently done another way
+        // 2. Recently done another way (pinned due dates are left alone)
         $stmt = db()->prepare("
             SELECT t.* FROM tasks t
             JOIN plants p ON t.plant_id = p.id
@@ -580,6 +581,7 @@ class CareScheduler
               AND t.task_type IN ({$typePlaceholders})
               AND t.completed_at IS NULL AND t.skipped_at IS NULL
               AND t.due_date <= ?
+              AND COALESCE(t.due_pinned, 0) = 0
               AND p.archived_at IS NULL
         ");
         $stmt->execute(array_merge($activeTypes, [$today]));

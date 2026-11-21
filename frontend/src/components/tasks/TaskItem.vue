@@ -184,18 +184,34 @@ async function handleCheckComplete(checkData) {
       return
     }
 
-    window.$toast?.success(`Check saved for ${plantName.value}`, {
-      action: { label: 'Undo', onClick: undoComplete }
-    })
+    // One toast, never a stack. The notes open in a sheet on request, so
+    // nothing covers the rest of the list.
+    const insights = result.insights || []
+    const name = plantName.value
+    if (insights.length) {
+      const needsAttention = insights.some(i => i.type === 'warning' || i.type === 'urgent')
+      const count = insights.length === 1 ? '1 note' : `${insights.length} notes`
+      window.$toast?.[needsAttention ? 'info' : 'success'](`Check saved for ${name}. ${count}.`, {
+        duration: 8000,
+        action: {
+          label: 'See notes',
+          onClick: () => window.$checkResults?.show({
+            plantName: name,
+            plantId: props.task.plant_id,
+            insights,
+            onUndo: undoComplete
+          })
+        }
+      })
+    } else {
+      window.$toast?.success(`Check saved for ${name}`, {
+        action: { label: 'Undo', onClick: undoComplete }
+      })
+    }
 
-    // Insights stay up longer so there's time to read them.
-    for (const insight of result.insights || []) {
-      const text = `${plantName.value}: ${insight.message}`
-      if (insight.type === 'warning' || insight.type === 'urgent') {
-        window.$toast?.error(text, { duration: 10000 })
-      } else {
-        window.$toast?.info(text, { duration: 8000 })
-      }
+    // The check may have moved or added a watering task; refresh quietly
+    if (result.tasksChanged) {
+      tasks.fetchTodayTasks()
     }
   } catch (error) {
     // Keep the form open so nothing that was entered is lost.
